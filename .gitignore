@@ -4,3 +4,6 @@ release/
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# Local Wi-Fi / location overrides (copy from include/secrets.h.example)
+include/secrets.h

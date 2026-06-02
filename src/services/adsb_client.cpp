@@ -131,6 +131,24 @@ void fillTagFields(Aircraft* ac, const JsonObject& plane) {
   formatAltitudeTag(plane, ac->alt, sizeof(ac->alt));
 }
 
+void buildAircraftJsonFilter(JsonDocument& filter) {
+  JsonObject ac0 = filter["ac"][0].to<JsonObject>();
+  ac0["lat"] = true;
+  ac0["lon"] = true;
+  ac0["flight"] = true;
+  ac0["hex"] = true;
+  ac0["t"] = true;
+  ac0["alt_baro"] = true;
+  ac0["alt_geom"] = true;
+  ac0["true_heading"] = true;
+  ac0["mag_heading"] = true;
+  ac0["track"] = true;
+  ac0["dir"] = true;
+  ac0["gs"] = true;
+  ac0["tas"] = true;
+  ac0["ias"] = true;
+}
+
 }  // namespace
 
 size_t aircraftCount() { return s_aircraft_count; }
@@ -157,6 +175,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   }
 
   http.setTimeout(10000);
+  http.setReuse(false);
   const int code = http.GET();
   if (code != HTTP_CODE_OK) {
     Serial.printf("adsb: HTTP %d\n", code);
@@ -164,11 +183,14 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     return false;
   }
 
-  const String payload = http.getString();
-  http.end();
+  JsonDocument filter;
+  buildAircraftJsonFilter(filter);
 
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, payload);
+  WiFiClient* stream = http.getStreamPtr();
+  const DeserializationError err =
+      deserializeJson(doc, *stream, DeserializationOption::Filter(filter));
+  http.end();
   if (err) {
     Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
     return false;

@@ -4,6 +4,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <esp_system.h>
 
 #include "config.h"
 #include "hardware/display.h"
@@ -38,7 +39,7 @@ void onRangeTap() {
                 ui::radar::rangeCurrent().outer_km);
 
   if (g_radar_visible && WiFi.status() == WL_CONNECTED) {
-    ui::radarDisplayDraw();
+    ui::radarDisplayRefreshRange();
   }
 }
 
@@ -67,9 +68,11 @@ void setup() {
   delay(500);
   Serial.println();
   Serial.println("Plane Radar");
+  Serial.printf("Reset reason: %d\n", static_cast<int>(esp_reset_reason()));
 
   bootButtonInit();
   displayInit();
+  displayBacklightOn();
   if (wifiShowsSetupScreenOnBoot()) {
     statusScreenPortal();
   }
@@ -78,7 +81,11 @@ void setup() {
 
   if (wifiSetupConnect()) {
     showRadarIfConnected();
+    if (g_radar_visible) {
+      fetchAndDrawAircraft();
+    }
   }
+  bootButtonEnableWifiReset();
 }
 
 void loop() {

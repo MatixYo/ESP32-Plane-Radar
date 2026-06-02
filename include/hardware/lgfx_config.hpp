@@ -14,7 +14,7 @@ public:
   LGFX() {
     {
       auto cfg = _bus.config();
-      cfg.spi_host = SPI2_HOST;
+      cfg.spi_host = config::kDisplaySpiHost;
       cfg.freq_write = config::kDisplaySpiWriteHz;
       cfg.pin_sclk = static_cast<int>(config::kDisplayPinSclk);
       cfg.pin_mosi = static_cast<int>(config::kDisplayPinMosi);

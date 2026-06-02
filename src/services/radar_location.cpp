@@ -47,6 +47,15 @@ void persist(double lat, double lon) {
 }  // namespace
 
 void init() {
+#if defined(PLANE_RADAR_SECRETS_ACTIVE) && PLANE_RADAR_SECRETS_ACTIVE
+  if (plane_radar_secrets::kOverrideDefaultLocation) {
+    persist(config::kDefaultRadarLat, config::kDefaultRadarLon);
+    Serial.printf("Radar location (secrets override): %.8f, %.8f\n", s_lat,
+                  s_lon);
+    return;
+  }
+#endif
+
   Preferences prefs;
   prefs.begin(kPrefsNamespace, true);
   if (prefs.isKey(kKeyLat) && prefs.isKey(kKeyLon)) {
