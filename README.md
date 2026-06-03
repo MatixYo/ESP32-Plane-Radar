@@ -2,9 +2,16 @@
 
 <img width="800" height="450" alt="plane-radar" src="https://github.com/user-attachments/assets/716d0992-dab8-47ba-8f1a-2aec7f607419" />
 
-**3D printed case (STL + assembly):** [MakerWorld](https://makerworld.com/en/models/2872376-esp32-plane-radar-live-ads-b-on-a-round-display#profileId-3207083) · **Firmware:** [Releases](https://github.com/MatixYo/ESP32-Plane-Radar/releases)
+Firmware for an **ESP32-C3** and a **1.28″ round display** (240×240px). Shows a circular **ADS-B radar** around your configured location, with **WiFiManager** for first-time setup.
 
-Firmware for an **ESP32-C3 Super Mini** and a **1.28″ round GC9A01** display (240×240). Shows a circular **ADS-B radar** around your configured location, with **WiFiManager** for first-time setup.
+**Firmware:** [Releases](https://github.com/MatixYo/ESP32-Plane-Radar/releases)
+
+## Supported Hardware
+
+1. ESP32-C3 Super Mini with 1.28" round GC9A01 display
+   1. **3D printed case (STL + assembly):** [MakerWorld](https://makerworld.com/en/models/2872376-esp32-plane-radar-live-ads-b-on-a-round-display#profileId-3207083)
+2. Seeed Studio XIAO Round Display with XIAO ESP32-C3
+   1. Off the shelf plug-and-play solution with several 3d case designs
 
 ## What it does
 
