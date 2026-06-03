@@ -9,6 +9,9 @@
 class LGFX : public lgfx::LGFX_Device {
   lgfx::Bus_SPI _bus;
   lgfx::Panel_GC9A01 _panel;
+#ifdef DISPLAY_HAS_BACKLIGHT
+  lgfx::Light_PWM _light;
+#endif
 
 public:
   LGFX() {
@@ -31,6 +34,17 @@ public:
       cfg.rgb_order = config::kDisplayRgbOrder;
       _panel.config(cfg);
     }
+#ifdef DISPLAY_HAS_BACKLIGHT
+    {
+      auto cfg = _light.config();
+      cfg.pin_bl = static_cast<int>(config::kDisplayPinBl);
+      cfg.invert = false;  // active HIGH
+      cfg.freq = 12000;
+      cfg.pwm_channel = 7;
+      _light.config(cfg);
+      _panel.setLight(&_light);  // enables tft.setBrightness()
+    }
+#endif
     setPanel(&_panel);
   }
 };

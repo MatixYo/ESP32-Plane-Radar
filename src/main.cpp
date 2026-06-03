@@ -7,6 +7,7 @@
 
 #include "config.h"
 #include "hardware/display.h"
+#include "hardware/touch.h"
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
 #include "services/wifi_setup.h"
@@ -42,9 +43,9 @@ void onRangeTap() {
   }
 }
 
-void handleBootButton() {
+void handleInput() {
   bootButtonPollLongPress();
-  if (bootButtonConsumeTap()) {
+  if (bootButtonConsumeTap() || touchConsumeTap()) {
     onRangeTap();
   }
 }
@@ -53,11 +54,11 @@ void fetchAndDrawAircraft() {
   const float fetch_km = ui::radar::fetchRadiusKm();
   if (!services::adsb::fetchUpdate(services::location::lat(),
                                    services::location::lon(), fetch_km)) {
-    handleBootButton();
+    handleInput();
     return;
   }
   ui::radarDisplayRefreshAircraft();
-  handleBootButton();
+  handleInput();
 }
 
 }  // namespace
@@ -69,6 +70,7 @@ void setup() {
   Serial.println("Plane Radar");
 
   bootButtonInit();
+  touchInit();
   displayInit();
   if (wifiShowsSetupScreenOnBoot()) {
     statusScreenPortal();
@@ -82,7 +84,7 @@ void setup() {
 }
 
 void loop() {
-  handleBootButton();
+  handleInput();
 
   if (WiFi.status() != WL_CONNECTED) {
     if (g_radar_visible) {
