@@ -183,7 +183,8 @@ void formatAltitudeTag(const JsonObject& plane, char* out, size_t out_len) {
   float alt = 0.0f;
   if (readJsonFloat(plane, "alt_baro", &alt) ||
       readJsonFloat(plane, "alt_geom", &alt)) {
-    snprintf(out, out_len, "%d ft", static_cast<int>(lroundf(alt)));
+    const int alt_m = static_cast<int>(lroundf(alt * 0.3048f));
+    snprintf(out, out_len, "%d m", alt_m);
   }
 }
 
