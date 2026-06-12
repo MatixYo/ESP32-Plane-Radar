@@ -239,7 +239,8 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
 
   WiFiClient* stream = http.getStreamPtr();
   if (!stream) { 
-    http.end(); return false; 
+    http.end(); 
+    return false; 
   }
   
   static JsonDocument filter;
@@ -267,6 +268,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   const DeserializationError err = deserializeJson(doc, *stream, DeserializationOption::Filter(filter));
   if (err) {
     Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
+    http.end();
     return false;
   }
   http.end();
