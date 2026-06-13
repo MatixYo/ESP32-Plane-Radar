@@ -1,5 +1,5 @@
 /**
- * Plane Radar — WiFi setup, then radar UI on the round GC9A01 display.
+ * Plane Radar — WiFi setup, then radar UI on the round display.
  */
 
 #include <Arduino.h>
@@ -8,6 +8,7 @@
 
 #include "config.h"
 #include "hardware/display.h"
+#include "hardware/touch_gesture.h"
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
 #include "services/wifi_setup.h"
@@ -31,8 +32,7 @@ void showRadarIfConnected() {
   g_radar_visible = true;
 }
 
-void onRangeTap() {
-  ui::radar::rangeNext();
+void onRangeChanged() {
   char range_label[12];
   ui::radar::formatCurrentRing3Label(range_label, sizeof(range_label));
   Serial.printf("Range: %s (outer ~%.0f km)\n", range_label,
@@ -43,10 +43,26 @@ void onRangeTap() {
   }
 }
 
+void onRangeTap() {
+  ui::radar::rangeNext();
+  onRangeChanged();
+}
+
 void handleBootButton() {
   bootButtonPollLongPress();
   if (bootButtonConsumeTap()) {
     onRangeTap();
+  }
+}
+
+void handleTouchGestures() {
+  const int pinch = touchGesturePollPinchZoom();
+  if (pinch > 0) {
+    ui::radar::rangeNext();
+    onRangeChanged();
+  } else if (pinch < 0) {
+    ui::radar::rangePrev();
+    onRangeChanged();
   }
 }
 
@@ -55,10 +71,12 @@ void fetchAndDrawAircraft() {
   if (!services::adsb::fetchUpdate(services::location::lat(),
                                    services::location::lon(), fetch_km)) {
     handleBootButton();
+    handleTouchGestures();
     return;
   }
   ui::radarDisplayRefreshAircraft();
   handleBootButton();
+  handleTouchGestures();
 }
 
 }  // namespace
@@ -73,6 +91,7 @@ void setup() {
   bootButtonInit();
   displayInit();
   displayBacklightOn();
+  touchGestureInit();
   if (wifiShowsSetupScreenOnBoot()) {
     statusScreenPortal();
   }
@@ -90,6 +109,7 @@ void setup() {
 
 void loop() {
   handleBootButton();
+  handleTouchGestures();
 
   if (WiFi.status() != WL_CONNECTED) {
     if (g_radar_visible) {

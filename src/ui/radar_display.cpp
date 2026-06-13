@@ -11,10 +11,10 @@
 #include "hardware/display_font.h"
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
+#include "ui/radar_geo.h"
 #include "ui/radar_range.h"
+#include "ui/radar_runways.h"
 #include "ui/radar_theme.h"
-
-namespace fonts = lgfx::v1::fonts;
 
 namespace ui {
 namespace radar {
@@ -27,6 +27,7 @@ uint16_t kColorAircraft = 0x001F;
 uint16_t kColorTrackVector = 0xFFFF;
 uint16_t kColorTagType = 0x5DFF;
 uint16_t kColorTagAltitude = 0xFFE0;
+uint16_t kColorRunway = 0xFFFF;
 
 }  // namespace radar
 
@@ -190,17 +191,17 @@ void initPalette() {
       tft.color565(radar::kTagTypeR, radar::kTagTypeG, radar::kTagTypeB);
   radar::kColorTagAltitude =
       tft.color565(radar::kTagAltR, radar::kTagAltG, radar::kTagAltB);
+  radar::kColorRunway =
+      tft.color565(radar::kRunwayR, radar::kRunwayG, radar::kRunwayB);
 }
-
-constexpr float kKmPerDeg = 111.0f;
 
 void offsetKmFromCenter(float lat, float lon, float* dx_km, float* dy_km,
                         float* dist_km) {
-  *dx_km =
-      static_cast<float>(lon - services::location::lon()) * kKmPerDeg;
-  *dy_km =
-      static_cast<float>(lat - services::location::lat()) * kKmPerDeg;
-  *dist_km = sqrtf((*dx_km) * (*dx_km) + (*dy_km) * (*dy_km));
+  radar::geo::offsetKmFromCenter(lat, lon, dx_km, dy_km, dist_km);
+}
+
+void latLonToScreen(float lat, float lon, int* out_x, int* out_y) {
+  radar::geo::latLonToScreen(lat, lon, out_x, out_y);
 }
 
 float innerRingMaxKm() {
@@ -208,20 +209,6 @@ float innerRingMaxKm() {
   return outer_km * (static_cast<float>(radar::kGridOuterRadius -
                                        radar::kAircraftInsideRingInsetPx) /
                      static_cast<float>(radar::kGridOuterRadius));
-}
-
-/** Flat lat/lon as x/y: 1° ≈ 111 km, north = screen up. */
-void latLonToScreen(float lat, float lon, int* out_x, int* out_y) {
-  const float outer_km = radar::rangeCurrent().outer_km;
-  const float px_per_km = static_cast<float>(radar::kGridOuterRadius) / outer_km;
-
-  float dx_km = 0.0f;
-  float dy_km = 0.0f;
-  float dist_km = 0.0f;
-  offsetKmFromCenter(lat, lon, &dx_km, &dy_km, &dist_km);
-
-  *out_x = radar::kCenterX + static_cast<int>(lroundf(dx_km * px_per_km));
-  *out_y = radar::kCenterY - static_cast<int>(lroundf(dy_km * px_per_km));
 }
 
 bool isInsideOuterRingKm(float dist_km) { return dist_km <= innerRingMaxKm(); }
@@ -640,6 +627,7 @@ void drawStaticGrid(Gfx& gfx) {
   gfx.fillScreen(radar::kColorBackground);
   drawRings(cx, cy, grid_r);
   drawCrosshairs(cx, cy, grid_r, radar::kColorGrid);
+  radar::drawRunways(gfx);
   drawCenterDot(cx, cy);
   drawCardinalLabels();
   drawScaleLabel(cx, cy, grid_r);

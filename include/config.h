@@ -4,7 +4,9 @@
 
 #include <driver/gpio.h>
 
-#if defined(PLANE_RADAR_BOARD_ESP32_TFT_ROUND)
+#if defined(PLANE_RADAR_BOARD_ESP32_P4_WAVESHARE_4C)
+#include "board/esp32_p4_waveshare_4c.h"
+#elif defined(PLANE_RADAR_BOARD_ESP32_TFT_ROUND)
 #include "board/esp32_tft_round.h"
 #else
 #include "board/supermini.h"
@@ -78,21 +80,44 @@ constexpr uint8_t kButtonReadThreshold = board::kButtonReadThreshold;
 /** Ignore BOOT taps shorter than this (debounce). */
 constexpr unsigned long kBootTapMinMs = board::kBootTapMinMs;
 
-// --- Display: GC9A01 1.28" round 240×240 (SPI) ---
+// --- Display ---
 constexpr gpio_num_t kDisplayPinRst = board::kDisplayPinRst;
+constexpr gpio_num_t kDisplayPinBl = board::kDisplayPinBl;
+
+#if defined(PLANE_RADAR_BOARD_ESP32_P4_WAVESHARE_4C)
 constexpr gpio_num_t kDisplayPinCs = board::kDisplayPinCs;
 constexpr gpio_num_t kDisplayPinDc = board::kDisplayPinDc;
 constexpr gpio_num_t kDisplayPinMosi = board::kDisplayPinMosi;
 constexpr gpio_num_t kDisplayPinSclk = board::kDisplayPinSclk;
-constexpr gpio_num_t kDisplayPinBl = board::kDisplayPinBl;
-constexpr spi_host_device_t kDisplaySpiHost = board::kDisplaySpiHost;
-
-constexpr int kDisplayWidth = 240;
-constexpr int kDisplayHeight = 240;
-
 constexpr uint32_t kDisplaySpiWriteHz = board::kDisplaySpiWriteHz;
 constexpr bool kDisplayInvert = board::kDisplayInvert;
 constexpr bool kDisplayRgbOrder = board::kDisplayRgbOrder;
+#else
+#include <driver/spi_master.h>
+constexpr gpio_num_t kDisplayPinCs = board::kDisplayPinCs;
+constexpr gpio_num_t kDisplayPinDc = board::kDisplayPinDc;
+constexpr gpio_num_t kDisplayPinMosi = board::kDisplayPinMosi;
+constexpr gpio_num_t kDisplayPinSclk = board::kDisplayPinSclk;
+constexpr spi_host_device_t kDisplaySpiHost = board::kDisplaySpiHost;
+constexpr uint32_t kDisplaySpiWriteHz = board::kDisplaySpiWriteHz;
+constexpr bool kDisplayInvert = board::kDisplayInvert;
+constexpr bool kDisplayRgbOrder = board::kDisplayRgbOrder;
+#endif
+
+constexpr int kDisplayBaseSize = 240;
+#if defined(PLANE_RADAR_BOARD_ESP32_P4_WAVESHARE_4C)
+constexpr int kDisplayWidth = board::kDisplayWidth;
+constexpr int kDisplayHeight = board::kDisplayHeight;
+#else
+constexpr int kDisplayWidth = 240;
+constexpr int kDisplayHeight = 240;
+#endif
+
+#if defined(PLANE_RADAR_BOARD_ESP32_P4_WAVESHARE_4C)
+constexpr bool kDisplayBacklightInvert = board::kDisplayBacklightInvert;
+constexpr gpio_num_t kTouchPinSda = board::kTouchPinSda;
+constexpr gpio_num_t kTouchPinScl = board::kTouchPinScl;
+#endif
 
 /** Poll adsb.fi (API public limit: 1 req/s). */
 constexpr unsigned long kAdsbFetchIntervalMs = 3000;
