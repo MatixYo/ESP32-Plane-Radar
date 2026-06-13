@@ -1,6 +1,7 @@
 #include "ui/radar_runways.h"
 
 #include "ui/radar_geo.h"
+#include "ui/radar_range.h"
 #include "ui/radar_theme.h"
 
 namespace ui::radar {
@@ -46,6 +47,9 @@ void drawRunwaySegment(lgfx::LGFXBase& gfx, const RunwaySegment& rwy) {
 }  // namespace
 
 void drawRunways(lgfx::LGFXBase& gfx) {
+  if (!radar::showRunways()) {
+    return;
+  }
   for (const RunwaySegment& rwy : kLocalRunways) {
     drawRunwaySegment(gfx, rwy);
   }

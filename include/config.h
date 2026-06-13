@@ -18,6 +18,8 @@
 
 namespace config {
 
+constexpr char kFirmwareVersion[] = "1.2.0";
+
 namespace defaults {
 constexpr double kRadarLat = 52.3676;
 constexpr double kRadarLon = 4.9041;

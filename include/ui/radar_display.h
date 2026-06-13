@@ -8,7 +8,4 @@ void radarDisplayDraw();
 /** Redraw aircraft only (blits cached grid; no full-screen clear). */
 void radarDisplayRefreshAircraft();
 
-/** Redraw only the range label (no full-screen clear). Use after rangeNext(). */
-void radarDisplayRefreshRange();
-
 }  // namespace ui

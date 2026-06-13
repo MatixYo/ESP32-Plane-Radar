@@ -12,6 +12,7 @@
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
 #include "services/wifi_setup.h"
+#include "ui/radar_color_mode.h"
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
@@ -39,7 +40,7 @@ void onRangeChanged() {
                 ui::radar::rangeCurrent().outer_km);
 
   if (g_radar_visible && WiFi.status() == WL_CONNECTED) {
-    ui::radarDisplayRefreshRange();
+    ui::radarDisplayDraw();
   }
 }
 
@@ -55,12 +56,23 @@ void handleBootButton() {
   }
 }
 
+void onColorModeChanged() {
+  if (g_radar_visible && WiFi.status() == WL_CONNECTED) {
+    ui::radarDisplayDraw();
+  }
+}
+
 void handleTouchGestures() {
-  const int pinch = touchGesturePollPinchZoom();
-  if (pinch > 0) {
+  const TouchGestureEvent touch = touchGesturePoll();
+  if (touch.color_mode_toggle) {
+    ui::radar::colorModeToggle();
+    onColorModeChanged();
+    return;
+  }
+  if (touch.pinch_zoom > 0) {
     ui::radar::rangeNext();
     onRangeChanged();
-  } else if (pinch < 0) {
+  } else if (touch.pinch_zoom < 0) {
     ui::radar::rangePrev();
     onRangeChanged();
   }
@@ -85,7 +97,7 @@ void setup() {
   Serial.begin(115200);
   delay(500);
   Serial.println();
-  Serial.println("Plane Radar");
+  Serial.printf("Plane Radar v%s\n", config::kFirmwareVersion);
   Serial.printf("Reset reason: %d\n", static_cast<int>(esp_reset_reason()));
 
   bootButtonInit();
@@ -97,6 +109,7 @@ void setup() {
   }
   services::location::init();
   ui::radar::rangeInit();
+  services::adsb::setPollFn(wifiLoop);
 
   if (wifiSetupConnect()) {
     showRadarIfConnected();
@@ -110,6 +123,7 @@ void setup() {
 void loop() {
   handleBootButton();
   handleTouchGestures();
+  wifiLoop();
 
   if (WiFi.status() != WL_CONNECTED) {
     if (g_radar_visible) {
