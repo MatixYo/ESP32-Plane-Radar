@@ -5,6 +5,12 @@
 
 namespace ui::radar {
 
+enum class AirportDataMode {
+  NONE = 0,
+  IATA = 1,
+  NAMES = 2
+};
+
 /**
  * Range presets (label on ring 3 = ¾ of outer radius).
  *
@@ -38,14 +44,19 @@ constexpr size_t kRangePresetCount =
 void rangeInit();
 /** Cycle preset and save to flash. */
 void rangeNext();
+void setRangeIndex(uint8_t index);
 const RangePreset& rangeCurrent();
 uint8_t rangeIndex();
+
+AirportDataMode getAirportDataMode();
+void setAirportDataMode(AirportDataMode mode);
+
 /** ADSB fetch radius (km): scaled to screen edge so beyond-ring dots have data. */
 float fetchRadiusKm();
 
 bool useMiles();
+void setUseMiles(bool use_miles);
 bool showRunways();
-/** WiFi portal checkbox: "T" = miles, otherwise km. */
 void saveMilesFromPortal(const char* checkbox_value);
 void saveRunwaysFromPortal(const char* checkbox_value);
 void formatRing3Label(char* buf, size_t len, float ring3_km, bool use_miles);
