@@ -85,6 +85,11 @@ char s_runways_checkbox_attrs[32] = "type=\"checkbox\"";
 WiFiManagerParameter s_param_runways("show_runways", "Show airport runways", "T", 2,
                                      s_runways_checkbox_attrs, WFM_LABEL_AFTER);
 
+// Airline label selector. Custom-HTML-only param renders a <select
+// name="airline_mode">; the value is read back from the web server on save.
+char s_airline_select_html[320] = "";
+WiFiManagerParameter s_param_airline(s_airline_select_html);
+
 // Board selector. Custom-HTML-only param renders a <select name="board">; the
 // posted value is read back directly from the web server (see onPortalParamsSaved).
 char s_board_select_html[320] = "";
@@ -112,6 +117,25 @@ void buildBoardSelectHtml() {
   }
 }
 
+void buildAirlineSelectHtml() {
+  const uint8_t cur = static_cast<uint8_t>(ui::radar::airlineDisplay());
+  const char* options[] = {"None", "Full Airline Name", "Airline Abbreviation"};
+  int n = snprintf(s_airline_select_html, sizeof(s_airline_select_html),
+                   "<br/><label for='airline_mode'>Show:</label>"
+                   "<select name='airline_mode' id='airline_mode'>");
+  for (uint8_t i = 0; i < 3 && n > 0 &&
+                      n < static_cast<int>(sizeof(s_airline_select_html));
+       ++i) {
+    n += snprintf(s_airline_select_html + n, sizeof(s_airline_select_html) - n,
+                  "<option value='%u'%s>%s</option>", i,
+                  i == cur ? " selected" : "", options[i]);
+  }
+  if (n > 0 && n < static_cast<int>(sizeof(s_airline_select_html))) {
+    snprintf(s_airline_select_html + n, sizeof(s_airline_select_html) - n,
+             "</select>");
+  }
+}
+
 void refreshPortalParamDefaults() {
   char lat_buf[kCoordParamLen + 1];
   char lon_buf[kCoordParamLen + 1];
@@ -125,6 +149,7 @@ void refreshPortalParamDefaults() {
   snprintf(s_runways_checkbox_attrs, sizeof(s_runways_checkbox_attrs),
            "type=\"checkbox\"%s", ui::radar::showRunways() ? " checked" : "");
   s_param_runways.setValue("T", 2);
+  buildAirlineSelectHtml();
   buildBoardSelectHtml();
 }
 
@@ -157,6 +182,10 @@ void onPortalParamsSaved() {
   }
   ui::radar::saveMilesFromPortal(s_param_miles.getValue());
   ui::radar::saveRunwaysFromPortal(s_param_runways.getValue());
+  if (s_wm.server) {
+    ui::radar::saveAirlineDisplayFromPortal(
+        s_wm.server->arg("airline_mode").c_str());
+  }
   saveBoardFromPortal();
 }
 
@@ -166,6 +195,7 @@ void attachPortalParams(WiFiManager& wm) {
   wm.addParameter(&s_param_lon);
   wm.addParameter(&s_param_miles);
   wm.addParameter(&s_param_runways);
+  wm.addParameter(&s_param_airline);
   wm.addParameter(&s_param_board);
   wm.setSaveParamsCallback(onPortalParamsSaved);
 }

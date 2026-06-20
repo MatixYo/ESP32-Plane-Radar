@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "config.h"
+#include "data/airlines.h"
 
 namespace services::adsb {
 
@@ -189,6 +190,8 @@ void formatAltitudeTag(const JsonObject& plane, char* out, size_t out_len) {
 
 void fillTagFields(Aircraft* ac, const JsonObject& plane) {
   copyJsonStringTrimmed(plane, "flight", ac->callsign, sizeof(ac->callsign));
+  // Resolve the airline from the flight callsign before any hex fallback.
+  ac->airline = data::airlines::forCallsign(ac->callsign);
   if (ac->callsign[0] == '\0') {
     copyJsonStringTrimmed(plane, "hex", ac->callsign, sizeof(ac->callsign));
   }
@@ -277,12 +280,13 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   s_aircraft_count = n;
   Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
   for (size_t i = 0; i < n; ++i) {
-    Serial.printf("  [%u] %s  %.4f,%.4f  %s  trk=%.0f gs=%.0f\n",
+    const Aircraft& ac = s_aircraft[i];
+    Serial.printf("  [%u] %s  %s %s  %.4f,%.4f  %s  trk=%.0f gs=%.0f\n",
                   static_cast<unsigned>(i),
-                  s_aircraft[i].callsign[0] != '\0' ? s_aircraft[i].callsign
-                                                    : "(no id)",
-                  s_aircraft[i].lat, s_aircraft[i].lon, s_aircraft[i].alt,
-                  s_aircraft[i].track_deg, s_aircraft[i].gs_knots);
+                  ac.callsign[0] != '\0' ? ac.callsign : "(no id)",
+                  ac.airline != nullptr ? ac.airline->iata : "",
+                  ac.airline != nullptr ? ac.airline->name : "",
+                  ac.lat, ac.lon, ac.alt, ac.track_deg, ac.gs_knots);
   }
   return true;
 }
