@@ -43,11 +43,21 @@ uint8_t rangeIndex();
 /** ADSB fetch radius (km): scaled to screen edge so beyond-ring dots have data. */
 float fetchRadiusKm();
 
+/** How to label aircraft with their airline (portal "Show:" selector). */
+enum class AirlineDisplay : uint8_t {
+  kNone = 0,      // don't show airline
+  kFullName = 1,  // e.g. "British Airways"
+  kAbbrev = 2,    // friendly short name, e.g. "Virgin"
+};
+
 bool useMiles();
 bool showRunways();
+AirlineDisplay airlineDisplay();
 /** WiFi portal checkbox: "T" = miles, otherwise km. */
 void saveMilesFromPortal(const char* checkbox_value);
 void saveRunwaysFromPortal(const char* checkbox_value);
+/** WiFi portal select: "0" none, "1" full name, "2" abbreviation. */
+void saveAirlineDisplayFromPortal(const char* select_value);
 void formatRing3Label(char* buf, size_t len, float ring3_km, bool use_miles);
 void formatCurrentRing3Label(char* buf, size_t len);
 /** Reset distance units to km (e.g. with WiFi credential wipe). */
