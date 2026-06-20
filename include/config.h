@@ -43,8 +43,11 @@ constexpr bool kDisplayInvert = true;
 constexpr double kDefaultRadarLat = 52.3676;
 constexpr double kDefaultRadarLon = 4.9041;
 
-/** Poll adsb.fi (API public limit: 1 req/s). */
-constexpr unsigned long kAdsbFetchIntervalMs = 3000;
+/** Poll interval for adsb.fi (seconds). Configurable in the portal; the API
+ *  public limit is 1 req/s, so the minimum is 3 s. */
+constexpr uint8_t kAdsbFetchIntervalDefaultSec = 3;
+constexpr uint8_t kAdsbFetchIntervalMinSec = 3;
+constexpr uint8_t kAdsbFetchIntervalMaxSec = 30;
 /** Legacy scale unused — fetch uses radar::fetchRadiusKm() to screen edge. */
 constexpr float kAdsbFetchRadiusScale = 1.0f;
 /** false = hide aircraft with alt_baro "ground"; true = show them too. */

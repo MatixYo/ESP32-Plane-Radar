@@ -9,6 +9,7 @@
 #include "hardware/display.h"
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
+#include "services/route.h"
 #include "services/wifi_setup.h"
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
@@ -66,11 +67,29 @@ void handleTouch() {
                                                static_cast<int>(ty));
       if (idx >= 0) {
         g_dialog_open = true;
-        ui::radarDisplayDrawDialog(idx);
+        services::route::RouteInfo route;
+        route.valid = false;
+        if (ui::radar::dialogFieldEnabled(ui::radar::DialogField::kRoute)) {
+          const services::adsb::Aircraft& ac =
+              services::adsb::aircraftList()[static_cast<size_t>(idx)];
+          if (ac.callsign[0] != '\0') {
+            services::route::lookup(ac.callsign, &route);
+          }
+        }
+        ui::radarDisplayDrawDialog(idx, &route);
       }
     }
   }
   was_touched = touched;
+}
+
+// Called by the ADS-B client during its (blocking) network I/O, so the WiFi
+// portal stays alive AND the sweep keeps animating instead of freezing.
+void radarPoll() {
+  wifiLoop();
+  if (g_radar_visible && !g_dialog_open && WiFi.status() == WL_CONNECTED) {
+    ui::radarDisplayAnimate();
+  }
 }
 
 void fetchAndDrawAircraft() {
@@ -99,7 +118,7 @@ void setup() {
   }
   services::location::init();
   ui::radar::rangeInit();
-  services::adsb::setPollFn(wifiLoop);
+  services::adsb::setPollFn(radarPoll);
 
   if (wifiSetupConnect()) {
     showRadarIfConnected();
@@ -132,13 +151,15 @@ void loop() {
     }
   } else {
     g_wifi_down_since = 0;
-    if (g_dialog_open) {
-      // Hold the dialog on screen; don't redraw the radar underneath it.
-    } else if (!g_radar_visible) {
-      showRadarIfConnected();
-    } else if (millis() - g_last_adsb_fetch_ms >= config::kAdsbFetchIntervalMs) {
-      g_last_adsb_fetch_ms = millis();
-      fetchAndDrawAircraft();
+    if (!g_dialog_open) {
+      if (!g_radar_visible) {
+        showRadarIfConnected();
+      } else if (millis() - g_last_adsb_fetch_ms >=
+                 ui::radar::adsbFetchIntervalMs()) {
+        g_last_adsb_fetch_ms = millis();
+        fetchAndDrawAircraft();
+      }
+      ui::radarDisplayAnimate();  // rotating sweep over the cached radar
     }
   }
 

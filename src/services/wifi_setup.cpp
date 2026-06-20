@@ -100,6 +100,11 @@ constexpr char kScaleInputAttrs[] =
 WiFiManagerParameter s_param_dlg_scale("dlg_scale", "Dialog text scale", "1.0", 6,
                                        kScaleInputAttrs);
 
+constexpr char kFetchInputAttrs[] =
+    " type=\"number\" step=\"1\" min=\"3\" max=\"30\"";
+WiFiManagerParameter s_param_fetch("fetch_sec", "ADS-B fetch interval (s)", "3", 4,
+                                   kFetchInputAttrs);
+
 // Board selector. Custom-HTML-only param renders a <select name="board">; the
 // posted value is read back directly from the web server (see onPortalParamsSaved).
 char s_board_select_html[320] = "";
@@ -180,6 +185,9 @@ void refreshPortalParamDefaults() {
   char scale_buf[8];
   snprintf(scale_buf, sizeof(scale_buf), "%.1f", ui::radar::dialogTextScale());
   s_param_dlg_scale.setValue(scale_buf, 6);
+  char fetch_buf[6];
+  snprintf(fetch_buf, sizeof(fetch_buf), "%d", ui::radar::adsbFetchIntervalSec());
+  s_param_fetch.setValue(fetch_buf, 4);
   buildBoardSelectHtml();
 }
 
@@ -226,6 +234,7 @@ void onPortalParamsSaved() {
     ui::radar::setDialogFieldsMask(dialog_mask);
   }
   ui::radar::saveDialogTextScaleFromPortal(s_param_dlg_scale.getValue());
+  ui::radar::saveFetchIntervalFromPortal(s_param_fetch.getValue());
   saveBoardFromPortal();
 }
 
@@ -238,6 +247,7 @@ void attachPortalParams(WiFiManager& wm) {
   wm.addParameter(&s_param_airline);
   wm.addParameter(&s_param_dialog_fields);
   wm.addParameter(&s_param_dlg_scale);
+  wm.addParameter(&s_param_fetch);
   wm.addParameter(&s_param_board);
   wm.setSaveParamsCallback(onPortalParamsSaved);
 }

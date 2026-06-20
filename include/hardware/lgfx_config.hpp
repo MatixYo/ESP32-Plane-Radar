@@ -28,6 +28,7 @@ public:
       cfg.pin_mosi = p.pin_mosi;
       cfg.pin_miso = -1;
       cfg.pin_dc = p.pin_dc;
+      cfg.dma_channel = SPI_DMA_CH_AUTO;  // non-blocking frame pushes
       _bus.config(cfg);
       _panel.setBus(&_bus);
     }

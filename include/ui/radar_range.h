@@ -59,6 +59,7 @@ enum class DialogField : uint8_t {
   kTrack,
   kDistance,
   kPosition,
+  kRoute,  // departure/arrival airports (looked up on tap)
   kCount,
 };
 
@@ -68,6 +69,11 @@ void setDialogFieldsMask(uint16_t mask);
 /** Multiplier on the flight dialog text size (1.0 = base size). */
 float dialogTextScale();
 void saveDialogTextScaleFromPortal(const char* value);
+
+/** ADS-B poll interval. Configurable (3-30 s); persisted to NVS. */
+unsigned long adsbFetchIntervalMs();
+int adsbFetchIntervalSec();
+void saveFetchIntervalFromPortal(const char* value);
 /** Portal form field name (e.g. "dlg_alt") for a dialog field. */
 const char* dialogFieldId(DialogField field);
 /** Human label (e.g. "Altitude") for a dialog field. */

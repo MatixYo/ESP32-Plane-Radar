@@ -54,6 +54,10 @@ int s_scale_label_max_w = 0;
 int s_scale_label_h = 0;
 
 lgfx::LovyanGFX* s_draw = &tft;
+// Single 16-bit compositing buffer: grid + aircraft + sweep are drawn here every
+// frame and pushed to the panel in one pass (flicker-free). A second cache
+// buffer won't fit alongside the TLS connection on this chip, so the grid is
+// re-rendered each frame; doing it every frame keeps the cadence uniform.
 LGFX_Sprite s_frame(&tft);
 bool s_frame_ready = false;
 
@@ -479,6 +483,48 @@ struct HitTarget {
 HitTarget s_hit_targets[services::adsb::kMaxAircraft];
 size_t s_hit_count = 0;
 
+// --- Radar sweep animation ---
+// A green wedge, full intensity at the leading edge fading to 0 over the span,
+// rotating clockwise. Colour #8BF688.
+constexpr int kSweepR = 0x8B;
+constexpr int kSweepG = 0xF6;
+constexpr int kSweepB = 0x88;
+constexpr float kSweepSpanDeg = 25.0f;   // bright front -> 0 over this many deg
+constexpr float kSweepStepDeg = 0.5f;    // radial line spacing
+constexpr float kSweepDegPerSec = 90.0f; // rotation speed (~4 s per revolution)
+constexpr unsigned long kSweepFrameMs = 50;  // ~20 fps cap
+
+float s_sweep_deg = 0.0f;
+unsigned long s_last_sweep_ms = 0;
+
+uint16_t sweepColorForIntensity(float t) {
+  const int r = radar::kBgR + static_cast<int>(lroundf((kSweepR - radar::kBgR) * t));
+  const int g = radar::kBgG + static_cast<int>(lroundf((kSweepG - radar::kBgG) * t));
+  const int b = radar::kBgB + static_cast<int>(lroundf((kSweepB - radar::kBgB) * t));
+  // Match the panel's colour order (same rule as the aircraft colour).
+  if (hardware::board::activePins().rgb_order) {
+    return tft.color565(b, g, r);
+  }
+  return tft.color565(r, g, b);
+}
+
+// Draw the sweep into the current draw target (the compositing buffer).
+void drawSweep(float lead_deg) {
+  const int cx = radar::kCenterX;
+  const int cy = radar::kCenterY;
+  const int radius = radar::kGridOuterRadius;
+  constexpr float kDegToRad = 0.0174532925f;
+  // Far (faint) to near (bright) so the bright leading edge is drawn last.
+  for (float a = kSweepSpanDeg; a >= 0.0f; a -= kSweepStepDeg) {
+    const float t = 1.0f - a / kSweepSpanDeg;  // 0 trailing, 1 leading
+    const uint16_t color = sweepColorForIntensity(t);
+    const float rad = (lead_deg - a) * kDegToRad;
+    const int ex = cx + static_cast<int>(lroundf(sinf(rad) * radius));
+    const int ey = cy - static_cast<int>(lroundf(cosf(rad) * radius));
+    s_draw->drawLine(cx, cy, ex, ey, color);
+  }
+}
+
 void sortDrawItemsFarFirst(AircraftDrawItem* items, size_t count) {
   for (size_t i = 1; i < count; ++i) {
     const AircraftDrawItem key = items[i];
@@ -694,14 +740,28 @@ bool ensureFrameSprite() {
   return true;
 }
 
-// Double-buffered frame: composite the grid AND aircraft into the off-screen
-// sprite, then blit it to the panel in a single pushSprite. Because the panel
-// is updated in one pass, labels never show an erase/redraw gap — no flicker.
-void renderFrame() {
+// Composite grid + aircraft (+ optional sweep) into s_frame and push once, so
+// the panel updates in a single pass (no flicker).
+void composeFrame(bool with_sweep) {
+  if (!ensureFrameSprite()) {
+    // No buffer: draw straight to the panel (may flicker, last resort).
+    const DrawScope scope(tft);
+    drawStaticGrid(tft);
+    drawAircraft();
+    if (with_sweep) {
+      drawSweep(s_sweep_deg);
+    }
+    tft.setTextDatum(textdatum_t::top_left);
+    return;
+  }
+
   drawStaticGrid(s_frame);  // opens its own DrawScope(s_frame)
   {
     const DrawScope scope(s_frame);
     drawAircraft();
+    if (with_sweep) {
+      drawSweep(s_sweep_deg);
+    }
   }
   s_frame.pushSprite(0, 0);
   tft.setTextDatum(textdatum_t::top_left);
@@ -712,28 +772,29 @@ void renderFrame() {
 void radarDisplayDraw() {
   initPalette();
   initLabelMetrics();
-
-  if (ensureFrameSprite()) {
-    renderFrame();
-    return;
-  }
-
-  // Fallback when the sprite can't be allocated: draw straight to the panel.
-  const DrawScope scope(tft);
-  drawStaticGrid(tft);
-  drawAircraft();
-  tft.setTextDatum(textdatum_t::top_left);
+  composeFrame(true);
 }
 
 void radarDisplayRefreshAircraft() {
   initPalette();
+  composeFrame(true);
+}
 
-  if (ensureFrameSprite()) {
-    renderFrame();
-    return;
+void radarDisplayAnimate() {
+  const unsigned long now = millis();
+  if (s_last_sweep_ms != 0 && now - s_last_sweep_ms < kSweepFrameMs) {
+    return;  // frame-rate cap
+  }
+  const float dt =
+      (s_last_sweep_ms == 0) ? 0.05f : (now - s_last_sweep_ms) / 1000.0f;
+  s_last_sweep_ms = now;
+  s_sweep_deg += kSweepDegPerSec * dt;
+  while (s_sweep_deg >= 360.0f) {
+    s_sweep_deg -= 360.0f;
   }
 
-  radarDisplayDraw();
+  // One composited, flicker-free frame: cached grid + aircraft + sweep.
+  composeFrame(true);
 }
 
 int radarDisplayHitTest(int x, int y) {
@@ -753,7 +814,8 @@ int radarDisplayHitTest(int x, int y) {
   return best;
 }
 
-void radarDisplayDrawDialog(int aircraft_index) {
+void radarDisplayDrawDialog(int aircraft_index,
+                            const services::route::RouteInfo* route) {
   const size_t n = services::adsb::aircraftCount();
   if (aircraft_index < 0 || static_cast<size_t>(aircraft_index) >= n) {
     return;
@@ -771,12 +833,27 @@ void radarDisplayDrawDialog(int aircraft_index) {
   snprintf(title, sizeof(title), "%s",
            ac.callsign[0] != '\0' ? ac.callsign : "(no id)");
 
-  char lines[8][28];
+  char lines[10][28];
   int nl = 0;
   using ui::radar::DialogField;
   if (ui::radar::dialogFieldEnabled(DialogField::kAirline) &&
       ac.airline != nullptr) {
     snprintf(lines[nl++], sizeof(lines[0]), "%s", ac.airline->name);
+  }
+  if (ui::radar::dialogFieldEnabled(DialogField::kRoute) && route != nullptr &&
+      route->valid) {
+    if (route->origin_city[0] != '\0') {
+      snprintf(lines[nl++], sizeof(lines[0]), "%s %s", route->origin_code,
+               route->origin_city);
+    } else {
+      snprintf(lines[nl++], sizeof(lines[0]), "%s", route->origin_code);
+    }
+    if (route->dest_city[0] != '\0') {
+      snprintf(lines[nl++], sizeof(lines[0]), "-> %s %s", route->dest_code,
+               route->dest_city);
+    } else {
+      snprintf(lines[nl++], sizeof(lines[0]), "-> %s", route->dest_code);
+    }
   }
   if (ui::radar::dialogFieldEnabled(DialogField::kType) && ac.type[0] != '\0') {
     snprintf(lines[nl++], sizeof(lines[0]), "Type: %s", ac.type);

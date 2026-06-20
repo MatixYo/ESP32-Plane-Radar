@@ -1,6 +1,7 @@
 #include "services/adsb_client.h"
 
 #include <HTTPClient.h>
+#include <WiFi.h>
 #include <WiFiClientSecure.h>
 
 #include <ArduinoJson.h>
@@ -22,6 +23,13 @@ constexpr unsigned long kRequestTimeoutMs = 10000;
 Aircraft s_aircraft[kMaxAircraft];
 size_t s_aircraft_count = 0;
 PollFn s_poll_fn = nullptr;
+
+// Persistent TLS connection: the adsb.fi server supports keep-alive, so we reuse
+// the connection across fetches. This avoids a ~1-2 s CPU-bound TLS handshake
+// every poll (which froze the radar sweep on the single-core ESP32-C3).
+WiFiClientSecure s_client;
+HTTPClient s_http;
+bool s_http_ready = false;
 
 void pollNetwork() {
   if (s_poll_fn != nullptr) {
@@ -218,33 +226,57 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   url += "/dist/";
   url += String(dist_nm, 1);
 
-  WiFiClientSecure client;
-  client.setInsecure();
+  if (!s_http_ready) {
+    s_client.setInsecure();
+    s_http.setReuse(true);  // keep the TLS connection open between fetches
+    s_http_ready = true;
+  }
 
-  HTTPClient http;
-  if (!http.begin(client, url)) {
+  if (!s_http.begin(s_client, url)) {
     Serial.println("adsb: http.begin failed");
     return false;
   }
 
-  http.setTimeout(kRequestTimeoutMs);
-  const int code = performGetWithPoll(http);
+  s_http.setTimeout(kRequestTimeoutMs);
+  const unsigned long t_get0 = millis();
+  const int code = performGetWithPoll(s_http);
+  const unsigned long t_get = millis() - t_get0;
   if (code != HTTP_CODE_OK) {
-    Serial.printf("adsb: HTTP %d\n", code);
-    http.end();
+    Serial.printf("adsb: HTTP %d (get=%lums rssi=%d heap=%u)\n", code, t_get,
+                  WiFi.RSSI(), ESP.getFreeHeap());
+    s_http.end();
     return false;
   }
 
+  const unsigned long t_body0 = millis();
   String payload;
-  if (!readResponseBodyWithPoll(http, payload)) {
+  if (!readResponseBodyWithPoll(s_http, payload)) {
     Serial.println("adsb: empty response");
-    http.end();
+    s_http.end();
     return false;
   }
-  http.end();
+  const unsigned long t_body = millis() - t_body0;
+  s_http.end();
+  Serial.printf("adsb: get=%lums body=%lums rssi=%d heap=%u\n", t_get, t_body,
+                WiFi.RSSI(), ESP.getFreeHeap());
+
+  // Filter: keep only the fields we use, so the parsed document is small and
+  // parsing is fast (the verbose adsb.fi response has ~30 fields per aircraft).
+  static JsonDocument s_filter;
+  static bool s_filter_ready = false;
+  if (!s_filter_ready) {
+    JsonObject f = s_filter["ac"].add<JsonObject>();
+    for (const char* key :
+         {"lat", "lon", "flight", "hex", "t", "alt_baro", "alt_geom", "gs",
+          "tas", "ias", "track", "true_heading", "mag_heading", "dir"}) {
+      f[key] = true;
+    }
+    s_filter_ready = true;
+  }
 
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, payload);
+  const DeserializationError err =
+      deserializeJson(doc, payload, DeserializationOption::Filter(s_filter));
   if (err) {
     Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
     return false;
@@ -279,15 +311,6 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
 
   s_aircraft_count = n;
   Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
-  for (size_t i = 0; i < n; ++i) {
-    const Aircraft& ac = s_aircraft[i];
-    Serial.printf("  [%u] %s  %s %s  %.4f,%.4f  %s  trk=%.0f gs=%.0f\n",
-                  static_cast<unsigned>(i),
-                  ac.callsign[0] != '\0' ? ac.callsign : "(no id)",
-                  ac.airline != nullptr ? ac.airline->iata : "",
-                  ac.airline != nullptr ? ac.airline->name : "",
-                  ac.lat, ac.lon, ac.alt, ac.track_deg, ac.gs_knots);
-  }
   return true;
 }
 
