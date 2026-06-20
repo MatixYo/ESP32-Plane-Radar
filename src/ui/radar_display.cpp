@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 
 #include "config.h"
@@ -463,10 +464,20 @@ struct AircraftDrawItem {
 };
 
 struct BeyondDotDrawItem {
+  size_t index = 0;
   int x = 0;
   int y = 0;
   int dist_sq = 0;
 };
+
+// Screen positions of aircraft from the last draw, for touch hit-testing.
+struct HitTarget {
+  size_t index;
+  int x;
+  int y;
+};
+HitTarget s_hit_targets[services::adsb::kMaxAircraft];
+size_t s_hit_count = 0;
 
 void sortDrawItemsFarFirst(AircraftDrawItem* items, size_t count) {
   for (size_t i = 1; i < count; ++i) {
@@ -502,6 +513,7 @@ void drawAircraft() {
   BeyondDotDrawItem dots[services::adsb::kMaxAircraft];
   size_t draw_count = 0;
   size_t dot_count = 0;
+  s_hit_count = 0;
 
   for (size_t i = 0; i < n; ++i) {
     float dx_km = 0.0f;
@@ -518,6 +530,7 @@ void drawAircraft() {
       items[draw_count].y = y;
       items[draw_count].dist_sq = distSqFromCenter(x, y);
       ++draw_count;
+      s_hit_targets[s_hit_count++] = {i, x, y};
       continue;
     }
 
@@ -527,10 +540,12 @@ void drawAircraft() {
                                      &dot_y)) {
       continue;
     }
+    dots[dot_count].index = i;
     dots[dot_count].x = dot_x;
     dots[dot_count].y = dot_y;
     dots[dot_count].dist_sq = distSqFromCenter(dot_x, dot_y);
     ++dot_count;
+    s_hit_targets[s_hit_count++] = {i, dot_x, dot_y};
   }
 
   sortBeyondDotsFarFirst(dots, dot_count);
@@ -719,6 +734,124 @@ void radarDisplayRefreshAircraft() {
   }
 
   radarDisplayDraw();
+}
+
+int radarDisplayHitTest(int x, int y) {
+  constexpr int kTapRadius = 26;
+  constexpr int kTapRadiusSq = kTapRadius * kTapRadius;
+  int best = -1;
+  int best_sq = kTapRadiusSq + 1;
+  for (size_t i = 0; i < s_hit_count; ++i) {
+    const int dx = s_hit_targets[i].x - x;
+    const int dy = s_hit_targets[i].y - y;
+    const int d2 = dx * dx + dy * dy;
+    if (d2 <= kTapRadiusSq && d2 < best_sq) {
+      best_sq = d2;
+      best = static_cast<int>(s_hit_targets[i].index);
+    }
+  }
+  return best;
+}
+
+void radarDisplayDrawDialog(int aircraft_index) {
+  const size_t n = services::adsb::aircraftCount();
+  if (aircraft_index < 0 || static_cast<size_t>(aircraft_index) >= n) {
+    return;
+  }
+  const services::adsb::Aircraft& ac =
+      services::adsb::aircraftList()[static_cast<size_t>(aircraft_index)];
+
+  float dx_km = 0.0f;
+  float dy_km = 0.0f;
+  float dist_km = 0.0f;
+  offsetKmFromCenter(ac.lat, ac.lon, &dx_km, &dy_km, &dist_km);
+
+  // Title (callsign) plus one line per enabled detail field.
+  char title[16];
+  snprintf(title, sizeof(title), "%s",
+           ac.callsign[0] != '\0' ? ac.callsign : "(no id)");
+
+  char lines[8][28];
+  int nl = 0;
+  using ui::radar::DialogField;
+  if (ui::radar::dialogFieldEnabled(DialogField::kAirline) &&
+      ac.airline != nullptr) {
+    snprintf(lines[nl++], sizeof(lines[0]), "%s", ac.airline->name);
+  }
+  if (ui::radar::dialogFieldEnabled(DialogField::kType) && ac.type[0] != '\0') {
+    snprintf(lines[nl++], sizeof(lines[0]), "Type: %s", ac.type);
+  }
+  if (ui::radar::dialogFieldEnabled(DialogField::kAltitude) &&
+      ac.alt[0] != '\0') {
+    snprintf(lines[nl++], sizeof(lines[0]), "Alt: %s", ac.alt);
+  }
+  if (ui::radar::dialogFieldEnabled(DialogField::kSpeed)) {
+    snprintf(lines[nl++], sizeof(lines[0]), "Spd: %d kt",
+             static_cast<int>(lroundf(ac.gs_knots)));
+  }
+  if (ui::radar::dialogFieldEnabled(DialogField::kTrack)) {
+    snprintf(lines[nl++], sizeof(lines[0]), "Trk: %d deg",
+             static_cast<int>(lroundf(ac.track_deg)));
+  }
+  if (ui::radar::dialogFieldEnabled(DialogField::kDistance)) {
+    if (ui::radar::useMiles()) {
+      snprintf(lines[nl++], sizeof(lines[0]), "Dist: %.1f mi",
+               dist_km / 1.609344f);
+    } else {
+      snprintf(lines[nl++], sizeof(lines[0]), "Dist: %.1f km", dist_km);
+    }
+  }
+  if (ui::radar::dialogFieldEnabled(DialogField::kPosition)) {
+    snprintf(lines[nl++], sizeof(lines[0]), "%.3f, %.3f", ac.lat, ac.lon);
+  }
+
+  // Blank the screen to de-clutter, then draw the details centred.
+  initTagLabelMetrics();
+  initPalette();
+  const DrawScope scope(tft);
+  displayFontEnsureLoaded(tft);
+  tft.fillScreen(radar::kColorBackground);
+  tft.setTextDatum(textdatum_t::middle_center);
+
+  const int cx = radar::kCenterX;
+
+  const float scale = ui::radar::dialogTextScale();
+  auto setTitleFont = [scale]() {
+    if (displayFontIsSmooth()) {
+      displayFontSetSmoothSize(tft, 1.6f * scale);
+    } else {
+      displayFontSetBitmap(tft, &fonts::FreeSansBold12pt7b);
+    }
+  };
+  auto setBodyFont = [scale]() {
+    if (displayFontIsSmooth()) {
+      displayFontSetSmoothSize(tft, 1.1f * scale);
+    } else {
+      displayFontSetBitmap(tft, &fonts::FreeSansBold9pt7b);
+    }
+  };
+
+  setTitleFont();
+  const int title_h = tft.fontHeight();
+  setBodyFont();
+  const int body_h = tft.fontHeight();
+
+  const int total_h = title_h + nl * body_h;
+  int y = radar::kCenterY - total_h / 2 + title_h / 2;
+
+  setTitleFont();
+  tft.setTextColor(radar::kColorLabel, radar::kColorBackground);
+  tft.drawString(title, cx, y);
+  y += title_h / 2 + body_h / 2;
+
+  setBodyFont();
+  for (int i = 0; i < nl; ++i) {
+    tft.setTextColor(radar::kColorLabel, radar::kColorBackground);
+    tft.drawString(lines[i], cx, y);
+    y += body_h;
+  }
+
+  tft.setTextDatum(textdatum_t::top_left);
 }
 
 }  // namespace ui

@@ -90,6 +90,16 @@ WiFiManagerParameter s_param_runways("show_runways", "Show airport runways", "T"
 char s_airline_select_html[320] = "";
 WiFiManagerParameter s_param_airline(s_airline_select_html);
 
+// Flight dialog detail checkboxes. Custom-HTML-only param renders one checkbox
+// per DialogField; each is read back from the web server on save.
+char s_dialog_fields_html[640] = "";
+WiFiManagerParameter s_param_dialog_fields(s_dialog_fields_html);
+
+constexpr char kScaleInputAttrs[] =
+    " type=\"number\" step=\"0.1\" min=\"0.5\" max=\"3\"";
+WiFiManagerParameter s_param_dlg_scale("dlg_scale", "Dialog text scale", "1.0", 6,
+                                       kScaleInputAttrs);
+
 // Board selector. Custom-HTML-only param renders a <select name="board">; the
 // posted value is read back directly from the web server (see onPortalParamsSaved).
 char s_board_select_html[320] = "";
@@ -136,6 +146,22 @@ void buildAirlineSelectHtml() {
   }
 }
 
+void buildDialogFieldsHtml() {
+  int n = snprintf(s_dialog_fields_html, sizeof(s_dialog_fields_html),
+                   "<br/><label>Flight dialog details:</label><br/>");
+  for (uint8_t i = 0;
+       i < static_cast<uint8_t>(ui::radar::DialogField::kCount) && n > 0 &&
+       n < static_cast<int>(sizeof(s_dialog_fields_html));
+       ++i) {
+    const auto field = static_cast<ui::radar::DialogField>(i);
+    n += snprintf(s_dialog_fields_html + n, sizeof(s_dialog_fields_html) - n,
+                  "<input type='checkbox' name='%s'%s> %s<br/>",
+                  ui::radar::dialogFieldId(field),
+                  ui::radar::dialogFieldEnabled(field) ? " checked" : "",
+                  ui::radar::dialogFieldLabel(field));
+  }
+}
+
 void refreshPortalParamDefaults() {
   char lat_buf[kCoordParamLen + 1];
   char lon_buf[kCoordParamLen + 1];
@@ -150,6 +176,10 @@ void refreshPortalParamDefaults() {
            "type=\"checkbox\"%s", ui::radar::showRunways() ? " checked" : "");
   s_param_runways.setValue("T", 2);
   buildAirlineSelectHtml();
+  buildDialogFieldsHtml();
+  char scale_buf[8];
+  snprintf(scale_buf, sizeof(scale_buf), "%.1f", ui::radar::dialogTextScale());
+  s_param_dlg_scale.setValue(scale_buf, 6);
   buildBoardSelectHtml();
 }
 
@@ -185,7 +215,17 @@ void onPortalParamsSaved() {
   if (s_wm.server) {
     ui::radar::saveAirlineDisplayFromPortal(
         s_wm.server->arg("airline_mode").c_str());
+    uint16_t dialog_mask = 0;
+    for (uint8_t i = 0; i < static_cast<uint8_t>(ui::radar::DialogField::kCount);
+         ++i) {
+      const auto field = static_cast<ui::radar::DialogField>(i);
+      if (s_wm.server->hasArg(ui::radar::dialogFieldId(field))) {
+        dialog_mask |= (1u << i);
+      }
+    }
+    ui::radar::setDialogFieldsMask(dialog_mask);
   }
+  ui::radar::saveDialogTextScaleFromPortal(s_param_dlg_scale.getValue());
   saveBoardFromPortal();
 }
 
@@ -196,6 +236,8 @@ void attachPortalParams(WiFiManager& wm) {
   wm.addParameter(&s_param_miles);
   wm.addParameter(&s_param_runways);
   wm.addParameter(&s_param_airline);
+  wm.addParameter(&s_param_dialog_fields);
+  wm.addParameter(&s_param_dlg_scale);
   wm.addParameter(&s_param_board);
   wm.setSaveParamsCallback(onPortalParamsSaved);
 }

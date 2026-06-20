@@ -50,6 +50,29 @@ enum class AirlineDisplay : uint8_t {
   kAbbrev = 2,    // friendly short name, e.g. "Virgin"
 };
 
+/** Detail fields shown in the tap-to-open flight dialog (each toggle in portal). */
+enum class DialogField : uint8_t {
+  kAirline = 0,
+  kType,
+  kAltitude,
+  kSpeed,
+  kTrack,
+  kDistance,
+  kPosition,
+  kCount,
+};
+
+bool dialogFieldEnabled(DialogField field);
+uint16_t dialogFieldsMask();
+void setDialogFieldsMask(uint16_t mask);
+/** Multiplier on the flight dialog text size (1.0 = base size). */
+float dialogTextScale();
+void saveDialogTextScaleFromPortal(const char* value);
+/** Portal form field name (e.g. "dlg_alt") for a dialog field. */
+const char* dialogFieldId(DialogField field);
+/** Human label (e.g. "Altitude") for a dialog field. */
+const char* dialogFieldLabel(DialogField field);
+
 bool useMiles();
 bool showRunways();
 AirlineDisplay airlineDisplay();

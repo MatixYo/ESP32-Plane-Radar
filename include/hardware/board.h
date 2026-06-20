@@ -23,15 +23,23 @@ struct DisplayPins {
   int pin_rst;        // -1 = tied to chip reset (not wired)
   int pin_backlight;  // -1 = hard-wired / not GPIO-controlled
   bool rgb_order;     // true = RGB, false = BGR
+  // Capacitive touch (CST816, I2C). touch_sda < 0 means no touch on this board.
+  int touch_sda;
+  int touch_scl;
+  int touch_int;  // -1 if not wired
+  int touch_rst;  // -1 if not wired
 };
 
 inline constexpr DisplayPins kBoards[kBoardCount] = {
-    // kSuperMini: ESP32-C3 Super Mini with a separately wired GC9A01.
+    // kSuperMini: ESP32-C3 Super Mini with a separately wired GC9A01 (no touch).
     {/*sclk*/ 4, /*mosi*/ 3, /*dc*/ 10, /*cs*/ 1, /*rst*/ 0, /*bl*/ -1,
-     /*rgb_order*/ true},
-    // kEsp32_2424S012: Sunton/JCZN integrated round board (BL on GPIO3, BGR).
+     /*rgb_order*/ true,
+     /*touch sda*/ -1, /*scl*/ -1, /*int*/ -1, /*rst*/ -1},
+    // kEsp32_2424S012: Sunton/JCZN integrated round board (BL on GPIO3, BGR,
+    // CST816 touch on I2C).
     {/*sclk*/ 6, /*mosi*/ 7, /*dc*/ 2, /*cs*/ 10, /*rst*/ -1, /*bl*/ 3,
-     /*rgb_order*/ false},
+     /*rgb_order*/ false,
+     /*touch sda*/ 4, /*scl*/ 5, /*int*/ 0, /*rst*/ 1},
 };
 
 constexpr Board compileDefault() {

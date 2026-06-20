@@ -17,14 +17,23 @@ constexpr char kPrefsRangeKey[] = "rangeIdx";
 constexpr char kPrefsMilesKey[] = "useMiles";
 constexpr char kPrefsRunwaysKey[] = "showRwys";
 constexpr char kPrefsAirlineKey[] = "airlnDisp";
+constexpr char kPrefsDialogKey[] = "dlgFields";
+constexpr char kPrefsDialogScaleKey[] = "dlgScale";
 constexpr uint8_t kDefaultRangeIndex = 1;  // 10 km ring
 constexpr float kKmPerMile = 1.609344f;
+constexpr float kDialogScaleMin = 0.5f;
+constexpr float kDialogScaleMax = 3.0f;
+
+constexpr uint16_t kDialogFieldsAll =
+    (1u << static_cast<uint8_t>(DialogField::kCount)) - 1u;
 
 Preferences s_prefs;
 uint8_t s_range_index = kDefaultRangeIndex;
 bool s_use_miles = false;
 bool s_show_runways = true;
 AirlineDisplay s_airline_display = AirlineDisplay::kNone;
+uint16_t s_dialog_fields = kDialogFieldsAll;  // all details on by default
+float s_dialog_text_scale = 1.0f;
 
 void saveRangeIndex() {
   if (!s_prefs.begin(kPrefsNamespace, false)) {
@@ -86,6 +95,8 @@ void rangeInit() {
   s_airline_display = (airline_mode <= static_cast<uint8_t>(AirlineDisplay::kAbbrev))
                           ? static_cast<AirlineDisplay>(airline_mode)
                           : AirlineDisplay::kNone;
+  s_dialog_fields = s_prefs.getUShort(kPrefsDialogKey, kDialogFieldsAll);
+  s_dialog_text_scale = s_prefs.getFloat(kPrefsDialogScaleKey, 1.0f);
   s_prefs.end();
 }
 
@@ -110,6 +121,64 @@ bool useMiles() { return s_use_miles; }
 bool showRunways() { return s_show_runways; }
 
 AirlineDisplay airlineDisplay() { return s_airline_display; }
+
+bool dialogFieldEnabled(DialogField field) {
+  return (s_dialog_fields & (1u << static_cast<uint8_t>(field))) != 0;
+}
+
+uint16_t dialogFieldsMask() { return s_dialog_fields; }
+
+void setDialogFieldsMask(uint16_t mask) {
+  s_dialog_fields = mask & kDialogFieldsAll;
+  if (s_prefs.begin(kPrefsNamespace, false)) {
+    s_prefs.putUShort(kPrefsDialogKey, s_dialog_fields);
+    s_prefs.end();
+  }
+}
+
+const char* dialogFieldId(DialogField field) {
+  switch (field) {
+    case DialogField::kAirline: return "dlg_airline";
+    case DialogField::kType: return "dlg_type";
+    case DialogField::kAltitude: return "dlg_alt";
+    case DialogField::kSpeed: return "dlg_speed";
+    case DialogField::kTrack: return "dlg_track";
+    case DialogField::kDistance: return "dlg_dist";
+    case DialogField::kPosition: return "dlg_pos";
+    default: return "";
+  }
+}
+
+const char* dialogFieldLabel(DialogField field) {
+  switch (field) {
+    case DialogField::kAirline: return "Airline";
+    case DialogField::kType: return "Aircraft type";
+    case DialogField::kAltitude: return "Altitude";
+    case DialogField::kSpeed: return "Ground speed";
+    case DialogField::kTrack: return "Track";
+    case DialogField::kDistance: return "Distance";
+    case DialogField::kPosition: return "Position";
+    default: return "";
+  }
+}
+
+float dialogTextScale() { return s_dialog_text_scale; }
+
+void saveDialogTextScaleFromPortal(const char* value) {
+  float scale = 1.0f;
+  if (value != nullptr && value[0] != '\0') {
+    const float v = strtof(value, nullptr);
+    if (v >= kDialogScaleMin && v <= kDialogScaleMax) {
+      scale = v;
+    }
+  }
+  s_dialog_text_scale = scale;
+  if (s_prefs.begin(kPrefsNamespace, false)) {
+    s_prefs.putFloat(kPrefsDialogScaleKey, s_dialog_text_scale);
+    s_prefs.end();
+  }
+  Serial.printf("Dialog text scale: %.2f\n", s_dialog_text_scale);
+}
 
 void saveMilesFromPortal(const char* checkbox_value) {
   s_use_miles = portalCheckboxChecked(checkbox_value);
@@ -155,10 +224,14 @@ void unitsReset() {
   s_use_miles = false;
   s_show_runways = true;
   s_airline_display = AirlineDisplay::kNone;
+  s_dialog_fields = kDialogFieldsAll;
+  s_dialog_text_scale = 1.0f;
   if (s_prefs.begin(kPrefsNamespace, false)) {
     s_prefs.remove(kPrefsMilesKey);
     s_prefs.remove(kPrefsRunwaysKey);
     s_prefs.remove(kPrefsAirlineKey);
+    s_prefs.remove(kPrefsDialogKey);
+    s_prefs.remove(kPrefsDialogScaleKey);
     s_prefs.end();
   }
 }
