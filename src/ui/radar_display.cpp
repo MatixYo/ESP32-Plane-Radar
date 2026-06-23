@@ -259,7 +259,7 @@ bool beyondRingEdgeDotFromLatLon(float lat, float lon, int* out_x, int* out_y) {
 
   const int cx = radar::kCenterX;
   const int cy = radar::kCenterY;
-  const int rim_r = radar::kCenterX - radar::kBeyondRingScreenMarginPx;
+  const int rim_r = radar::kSize / 2 - radar::kBeyondRingScreenMarginPx;
   const float angle_rad = atan2f(dx_km, dy_km);
 
   *out_x = cx + static_cast<int>(lroundf(sinf(angle_rad) * rim_r));
@@ -418,14 +418,14 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   int anchor_x = 0;
   if (tag_on_right) {
     anchor_x = x + symbol_half + radar::kAircraftLabelGapPx;
-    anchor_x = std::min(anchor_x, radar::kSize - block_w - 1);
+    anchor_x = std::min(anchor_x, radar::kRight - block_w);
     s_draw->setTextDatum(textdatum_t::top_left);
   } else {
     anchor_x = x - symbol_half - radar::kAircraftLabelGapPx;
-    anchor_x = std::max(anchor_x, block_w + 1);
+    anchor_x = std::max(anchor_x, radar::kOffsetX + block_w + 1);
     s_draw->setTextDatum(textdatum_t::top_right);
   }
-  ly = std::max(1, std::min(ly, radar::kSize - block_h - 1));
+  ly = std::max(radar::kOffsetY + 1, std::min(ly, radar::kBottom - block_h));
 
   if (plane.callsign[0] != '\0') {
     s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
@@ -616,13 +616,12 @@ void drawCenterDot(int cx, int cy) {
 void drawCardinalLabels() {
   const int cx = radar::kCenterX;
   const int cy = radar::kCenterY;
-  const int edge = radar::kSize - 1;
-
-  drawCardinalLabel("N", cx, radar::kCardinalNorthOffsetY, textdatum_t::top_center);
-  drawCardinalLabel("S", cx, edge + radar::kCardinalSouthOffsetY,
+  drawCardinalLabel("N", cx, radar::kOffsetY + radar::kCardinalNorthOffsetY,
+                    textdatum_t::top_center);
+  drawCardinalLabel("S", cx, radar::kBottom + radar::kCardinalSouthOffsetY,
                     textdatum_t::bottom_center);
-  drawCardinalLabel("W", 0, cy, textdatum_t::middle_left);
-  drawCardinalLabel("E", edge, cy, textdatum_t::middle_right);
+  drawCardinalLabel("W", radar::kOffsetX, cy, textdatum_t::middle_left);
+  drawCardinalLabel("E", radar::kRight, cy, textdatum_t::middle_right);
 }
 
 int scaleLabelAnchorX(int cx, int outer_radius) {
@@ -661,7 +660,7 @@ bool ensureFrameSprite() {
     return true;
   }
   s_frame.setColorDepth(16);
-  if (!s_frame.createSprite(radar::kSize, radar::kSize)) {
+  if (!s_frame.createSprite(config::kDisplayWidth, config::kDisplayHeight)) {
     Serial.println("radar: frame sprite alloc failed");
     return false;
   }
@@ -687,6 +686,7 @@ void renderFrame() {
 void radarDisplayDraw() {
   initPalette();
   initLabelMetrics();
+  displayRadarBackground();
 
   if (ensureFrameSprite()) {
     renderFrame();

@@ -26,6 +26,9 @@ bool s_long_press_handled = false;
 bool s_boot_interrupt_attached = false;
 
 void IRAM_ATTR onBootButtonIsr() {
+  if (!config::kHasBootButton) {
+    return;
+  }
   const bool down = digitalRead(config::kBootPin) == LOW;
   const unsigned long now = millis();
   portENTER_CRITICAL_ISR(&s_boot_mux);
@@ -34,7 +37,8 @@ void IRAM_ATTR onBootButtonIsr() {
     s_boot_down_ms = now;
   } else if (s_boot_is_down) {
     const unsigned long held = now - s_boot_down_ms;
-    if (held >= config::kBootTapMinMs && held < config::kBootResetHoldMs) {
+    if (config::kBootTapChangesRange && held >= config::kBootTapMinMs &&
+        held < config::kBootResetHoldMs) {
       s_boot_tap_pending = true;
     }
     s_boot_is_down = false;
@@ -43,6 +47,9 @@ void IRAM_ATTR onBootButtonIsr() {
 }
 
 void initBootButton() {
+  if (!config::kHasBootButton) {
+    return;
+  }
   pinMode(config::kBootPin, INPUT_PULLUP);
   if (s_boot_interrupt_attached) {
     return;
@@ -361,12 +368,18 @@ bool wifiShowsSetupScreenOnBoot() {
 }
 
 bool wifiBootButtonPressed() {
+  if (!config::kHasBootButton) {
+    return false;
+  }
   return digitalRead(config::kBootPin) == LOW;
 }
 
 void bootButtonInit() { initBootButton(); }
 
 bool bootButtonConsumeTap() {
+  if (!config::kHasBootButton || !config::kBootTapChangesRange) {
+    return false;
+  }
   portENTER_CRITICAL(&s_boot_mux);
   const bool tap = s_boot_tap_pending;
   if (tap) {
@@ -377,6 +390,9 @@ bool bootButtonConsumeTap() {
 }
 
 void bootButtonPollLongPress() {
+  if (!config::kHasBootButton) {
+    return;
+  }
   if (wifiBootButtonPressed()) {
     portENTER_CRITICAL(&s_boot_mux);
     if (!s_boot_is_down) {

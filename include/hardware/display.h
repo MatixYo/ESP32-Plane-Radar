@@ -5,3 +5,4 @@
 extern LGFX tft;
 
 void displayInit();
+void displayRadarBackground();
