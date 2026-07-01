@@ -10,8 +10,7 @@
 #include "config.h"
 #include "hardware/display.h"
 #include "hardware/display_font.h"
-
-namespace fonts = lgfx::v1::fonts;
+#include "services/hostname.h"
 
 namespace {
 
@@ -214,7 +213,7 @@ void statusScreenPortal() {
       {"1. Join network:", 1.05f, &kPortalGfxBody},
       {config::kPortalApName, 1.12f, &kPortalGfxEmphasis},
       {"2. Open in browser:", 1.05f, &kPortalGfxBody},
-      {config::kPortalHostUrl, 1.12f, &kPortalGfxEmphasis},
+      {services::hostname::hostUrl(), 1.12f, &kPortalGfxEmphasis},
       {"or 192.168.4.1", 1.0f, &kPortalGfxBody},
   };
   drawTextBlock(config::kColorYellow, config::kTextOnYellow, lines,

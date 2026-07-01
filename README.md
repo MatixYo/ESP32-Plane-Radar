@@ -33,9 +33,9 @@ During setup you can also hold BOOT at power-on to force a credential reset (sam
 **Reconfigure anytime** (after the device is on your network):
 
 1. Open **`http://plane-radar.local`** or **`http://<device-ip>`** (e.g. from your router or serial log at boot)
-2. Change Wi‑Fi, location, units, or runway overlay; save
+2. Change Wi‑Fi, location, units, runway overlay, or device name; save
 
-The same portal runs on the setup AP and on the device’s LAN IP while connected to Wi‑Fi. mDNS hostname is `plane-radar` → **plane-radar.local** (`kPortalHostname` in `config.h`). Some clients resolve `.local` slowly; use the IP if needed.
+The same portal runs on the setup AP and on the device’s LAN IP while connected to Wi‑Fi. mDNS hostname defaults to `plane-radar` → **plane-radar.local**, but can be changed from the portal's "Device name" field (persisted in NVS; falls back to `kPortalHostname` in `config.h` if never set, and resets to it on a WiFi credential reset). Some clients resolve `.local` slowly; use the IP if needed.
 
 **Custom fields** (stored in NVS):
 
@@ -95,11 +95,12 @@ Edit **`include/config.h`** for hardware and behavior:
 
 | Area | Keys / notes |
 |------|----------------|
-| Portal | `kPortalApName`, `kPortalIp`, `kPortalHostname` / `kPortalHostUrl` (mDNS; needs `-DWM_MDNS` in `platformio.ini`) |
+| Portal | `kPortalApName`, `kPortalIp`, `kPortalHostname` (mDNS default; needs `-DWM_MDNS` in `platformio.ini`) |
 | Wi‑Fi timing | connect attempts, reconnect grace, portal timeout (`0` = no timeout) |
 | BOOT | `kBootPin`, `kBootResetHoldMs`, `kBootTapMinMs` |
 | Display SPI | pins, `kDisplayInvert`, `kDisplayRgbOrder`, `kDisplaySpiWriteHz` |
 | Default location | `kDefaultRadarLat`, `kDefaultRadarLon` (until portal overrides) |
+| Device name | mDNS hostname override, set via portal "Device name" field (until portal overrides) |
 | ADS-B | `kAdsbFetchIntervalMs`, `kAdsbShowGroundAircraft` |
 
 Range presets: `include/ui/radar_range.h` (`kRangePresets`).

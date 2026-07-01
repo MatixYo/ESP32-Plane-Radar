@@ -8,6 +8,7 @@
 #include "config.h"
 #include "hardware/display.h"
 #include "services/adsb_client.h"
+#include "services/hostname.h"
 #include "services/radar_location.h"
 #include "services/wifi_setup.h"
 #include "ui/radar_display.h"
@@ -70,6 +71,7 @@ void setup() {
 
   bootButtonInit();
   displayInit();
+  services::hostname::init();
   if (wifiShowsSetupScreenOnBoot()) {
     statusScreenPortal();
   }
