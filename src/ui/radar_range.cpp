@@ -1,10 +1,12 @@
 #include "ui/radar_range.h"
 
+#include "config.h"
 #include "ui/radar_theme.h"
 
 #include <Preferences.h>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace ui::radar {
@@ -15,13 +17,26 @@ constexpr char kPrefsNamespace[] = "planeradar";
 constexpr char kPrefsRangeKey[] = "rangeIdx";
 constexpr char kPrefsMilesKey[] = "useMiles";
 constexpr char kPrefsRunwaysKey[] = "showRwys";
+constexpr char kPrefsAirlineKey[] = "airlnDisp";
+constexpr char kPrefsDialogKey[] = "dlgFields";
+constexpr char kPrefsDialogScaleKey[] = "dlgScale";
+constexpr char kPrefsFetchSecKey[] = "fetchSec";
 constexpr uint8_t kDefaultRangeIndex = 1;  // 10 km ring
 constexpr float kKmPerMile = 1.609344f;
+constexpr float kDialogScaleMin = 0.5f;
+constexpr float kDialogScaleMax = 3.0f;
+
+constexpr uint16_t kDialogFieldsAll =
+    (1u << static_cast<uint8_t>(DialogField::kCount)) - 1u;
 
 Preferences s_prefs;
 uint8_t s_range_index = kDefaultRangeIndex;
 bool s_use_miles = false;
 bool s_show_runways = true;
+AirlineDisplay s_airline_display = AirlineDisplay::kNone;
+uint16_t s_dialog_fields = kDialogFieldsAll;  // all details on by default
+float s_dialog_text_scale = 1.0f;
+uint8_t s_fetch_interval_sec = config::kAdsbFetchIntervalDefaultSec;
 
 void saveRangeIndex() {
   if (!s_prefs.begin(kPrefsNamespace, false)) {
@@ -44,6 +59,14 @@ void saveShowRunways() {
     return;
   }
   s_prefs.putBool(kPrefsRunwaysKey, s_show_runways);
+  s_prefs.end();
+}
+
+void saveAirlineDisplay() {
+  if (!s_prefs.begin(kPrefsNamespace, false)) {
+    return;
+  }
+  s_prefs.putUChar(kPrefsAirlineKey, static_cast<uint8_t>(s_airline_display));
   s_prefs.end();
 }
 
@@ -70,6 +93,20 @@ void rangeInit() {
       (saved < kRangePresetCount) ? saved : kDefaultRangeIndex;
   s_use_miles = s_prefs.getBool(kPrefsMilesKey, false);
   s_show_runways = s_prefs.getBool(kPrefsRunwaysKey, true);
+  const uint8_t airline_mode = s_prefs.getUChar(
+      kPrefsAirlineKey, static_cast<uint8_t>(AirlineDisplay::kNone));
+  s_airline_display = (airline_mode <= static_cast<uint8_t>(AirlineDisplay::kAbbrev))
+                          ? static_cast<AirlineDisplay>(airline_mode)
+                          : AirlineDisplay::kNone;
+  s_dialog_fields = s_prefs.getUShort(kPrefsDialogKey, kDialogFieldsAll);
+  s_dialog_text_scale = s_prefs.getFloat(kPrefsDialogScaleKey, 1.0f);
+  const uint8_t fetch_sec = s_prefs.getUChar(
+      kPrefsFetchSecKey, config::kAdsbFetchIntervalDefaultSec);
+  s_fetch_interval_sec =
+      (fetch_sec < config::kAdsbFetchIntervalMinSec) ? config::kAdsbFetchIntervalMinSec
+      : (fetch_sec > config::kAdsbFetchIntervalMaxSec)
+          ? config::kAdsbFetchIntervalMaxSec
+          : fetch_sec;
   s_prefs.end();
 }
 
@@ -93,6 +130,91 @@ bool useMiles() { return s_use_miles; }
 
 bool showRunways() { return s_show_runways; }
 
+AirlineDisplay airlineDisplay() { return s_airline_display; }
+
+bool dialogFieldEnabled(DialogField field) {
+  return (s_dialog_fields & (1u << static_cast<uint8_t>(field))) != 0;
+}
+
+uint16_t dialogFieldsMask() { return s_dialog_fields; }
+
+void setDialogFieldsMask(uint16_t mask) {
+  s_dialog_fields = mask & kDialogFieldsAll;
+  if (s_prefs.begin(kPrefsNamespace, false)) {
+    s_prefs.putUShort(kPrefsDialogKey, s_dialog_fields);
+    s_prefs.end();
+  }
+}
+
+const char* dialogFieldId(DialogField field) {
+  switch (field) {
+    case DialogField::kAirline: return "dlg_airline";
+    case DialogField::kType: return "dlg_type";
+    case DialogField::kAltitude: return "dlg_alt";
+    case DialogField::kSpeed: return "dlg_speed";
+    case DialogField::kTrack: return "dlg_track";
+    case DialogField::kDistance: return "dlg_dist";
+    case DialogField::kPosition: return "dlg_pos";
+    case DialogField::kRoute: return "dlg_route";
+    default: return "";
+  }
+}
+
+const char* dialogFieldLabel(DialogField field) {
+  switch (field) {
+    case DialogField::kAirline: return "Airline";
+    case DialogField::kType: return "Aircraft type";
+    case DialogField::kAltitude: return "Altitude";
+    case DialogField::kSpeed: return "Ground speed";
+    case DialogField::kTrack: return "Track";
+    case DialogField::kDistance: return "Distance";
+    case DialogField::kPosition: return "Position";
+    case DialogField::kRoute: return "Departure / arrival";
+    default: return "";
+  }
+}
+
+float dialogTextScale() { return s_dialog_text_scale; }
+
+unsigned long adsbFetchIntervalMs() {
+  return static_cast<unsigned long>(s_fetch_interval_sec) * 1000UL;
+}
+
+int adsbFetchIntervalSec() { return s_fetch_interval_sec; }
+
+void saveFetchIntervalFromPortal(const char* value) {
+  uint8_t sec = config::kAdsbFetchIntervalDefaultSec;
+  if (value != nullptr && value[0] != '\0') {
+    const long v = strtol(value, nullptr, 10);
+    if (v >= config::kAdsbFetchIntervalMinSec &&
+        v <= config::kAdsbFetchIntervalMaxSec) {
+      sec = static_cast<uint8_t>(v);
+    }
+  }
+  s_fetch_interval_sec = sec;
+  if (s_prefs.begin(kPrefsNamespace, false)) {
+    s_prefs.putUChar(kPrefsFetchSecKey, s_fetch_interval_sec);
+    s_prefs.end();
+  }
+  Serial.printf("ADS-B fetch interval: %u s\n", s_fetch_interval_sec);
+}
+
+void saveDialogTextScaleFromPortal(const char* value) {
+  float scale = 1.0f;
+  if (value != nullptr && value[0] != '\0') {
+    const float v = strtof(value, nullptr);
+    if (v >= kDialogScaleMin && v <= kDialogScaleMax) {
+      scale = v;
+    }
+  }
+  s_dialog_text_scale = scale;
+  if (s_prefs.begin(kPrefsNamespace, false)) {
+    s_prefs.putFloat(kPrefsDialogScaleKey, s_dialog_text_scale);
+    s_prefs.end();
+  }
+  Serial.printf("Dialog text scale: %.2f\n", s_dialog_text_scale);
+}
+
 void saveMilesFromPortal(const char* checkbox_value) {
   s_use_miles = portalCheckboxChecked(checkbox_value);
   saveUseMiles();
@@ -103,6 +225,20 @@ void saveRunwaysFromPortal(const char* checkbox_value) {
   s_show_runways = portalCheckboxChecked(checkbox_value);
   saveShowRunways();
   Serial.printf("Runway overlay: %s\n", s_show_runways ? "on" : "off");
+}
+
+void saveAirlineDisplayFromPortal(const char* select_value) {
+  uint8_t mode = static_cast<uint8_t>(AirlineDisplay::kNone);
+  if (select_value != nullptr && select_value[0] != '\0') {
+    const long v = strtol(select_value, nullptr, 10);
+    if (v >= 0 && v <= static_cast<long>(AirlineDisplay::kAbbrev)) {
+      mode = static_cast<uint8_t>(v);
+    }
+  }
+  s_airline_display = static_cast<AirlineDisplay>(mode);
+  saveAirlineDisplay();
+  const char* labels[] = {"none", "full name", "abbreviation"};
+  Serial.printf("Airline display: %s\n", labels[mode]);
 }
 
 void formatRing3Label(char* buf, size_t len, float ring3_km, bool use_miles) {
@@ -122,9 +258,17 @@ void formatCurrentRing3Label(char* buf, size_t len) {
 void unitsReset() {
   s_use_miles = false;
   s_show_runways = true;
+  s_airline_display = AirlineDisplay::kNone;
+  s_dialog_fields = kDialogFieldsAll;
+  s_dialog_text_scale = 1.0f;
+  s_fetch_interval_sec = config::kAdsbFetchIntervalDefaultSec;
   if (s_prefs.begin(kPrefsNamespace, false)) {
     s_prefs.remove(kPrefsMilesKey);
     s_prefs.remove(kPrefsRunwaysKey);
+    s_prefs.remove(kPrefsAirlineKey);
+    s_prefs.remove(kPrefsDialogKey);
+    s_prefs.remove(kPrefsDialogScaleKey);
+    s_prefs.remove(kPrefsFetchSecKey);
     s_prefs.end();
   }
 }

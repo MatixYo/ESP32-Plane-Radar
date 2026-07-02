@@ -4,9 +4,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 
 #include "config.h"
+#include "hardware/board.h"
 #include "hardware/display.h"
 #include "hardware/display_font.h"
 #include "services/adsb_client.h"
@@ -52,6 +54,10 @@ int s_scale_label_max_w = 0;
 int s_scale_label_h = 0;
 
 lgfx::LovyanGFX* s_draw = &tft;
+// Single 16-bit compositing buffer: grid + aircraft + sweep are drawn here every
+// frame and pushed to the panel in one pass (flicker-free). A second cache
+// buffer won't fit alongside the TLS connection on this chip, so the grid is
+// re-rendered each frame; doing it every frame keeps the cadence uniform.
 LGFX_Sprite s_frame(&tft);
 bool s_frame_ready = false;
 
@@ -180,7 +186,7 @@ void initPalette() {
   radar::kColorLabel = tft.color565(255, 255, 255);
   radar::kColorCenter = tft.color565(255, 255, 255);
   // GC9A01 BGR panel: swap R/B in color565 so logical red renders red on screen.
-  if (config::kDisplayRgbOrder) {
+  if (hardware::board::activePins().rgb_order) {
     radar::kColorAircraft =
         tft.color565(radar::kAircraftB, radar::kAircraftG, radar::kAircraftR);
   } else {
@@ -378,37 +384,57 @@ void applyTagStyle() {
   }
 }
 
-int measureTagBlockWidth(const services::adsb::Aircraft& plane) {
-  applyTagStyle();
-  int max_w = 0;
-  if (plane.callsign[0] != '\0') {
-    const int w = s_draw->textWidth(plane.callsign);
-    if (w > max_w) {
-      max_w = w;
+struct TagLine {
+  const char* text;
+  uint16_t color;
+};
+
+constexpr int kMaxTagLines = 4;
+
+// Builds the tag lines for an aircraft into out_lines. The airline line is shown
+// (full name or friendly abbreviation) only when enabled and resolved.
+int buildTagLines(const services::adsb::Aircraft& plane, TagLine* out_lines) {
+  int n = 0;
+  const ui::radar::AirlineDisplay mode = ui::radar::airlineDisplay();
+  if (mode != ui::radar::AirlineDisplay::kNone && plane.airline != nullptr) {
+    const char* text = (mode == ui::radar::AirlineDisplay::kAbbrev)
+                           ? plane.airline->short_name
+                           : plane.airline->name;
+    if (text != nullptr && text[0] != '\0') {
+      out_lines[n++] = {text, radar::kColorLabel};
     }
+  }
+  if (plane.callsign[0] != '\0') {
+    out_lines[n++] = {plane.callsign, radar::kColorLabel};
   }
   if (plane.type[0] != '\0') {
-    const int w = s_draw->textWidth(plane.type);
-    if (w > max_w) {
-      max_w = w;
-    }
+    out_lines[n++] = {plane.type, radar::kColorTagType};
   }
   if (plane.alt[0] != '\0') {
-    const int w = s_draw->textWidth(plane.alt);
-    if (w > max_w) {
-      max_w = w;
-    }
+    out_lines[n++] = {plane.alt, radar::kColorTagAltitude};
   }
-  return max_w;
+  return n;
 }
 
 void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   initTagLabelMetrics();
   applyTagStyle();
 
+  TagLine lines[kMaxTagLines];
+  const int n_lines = buildTagLines(plane, lines);
+  if (n_lines == 0) {
+    return;
+  }
+
   const int line_h = s_draw->fontHeight();
-  const int block_w = measureTagBlockWidth(plane);
-  const int block_h = line_h * 3;
+  int block_w = 0;
+  for (int i = 0; i < n_lines; ++i) {
+    const int w = s_draw->textWidth(lines[i].text);
+    if (w > block_w) {
+      block_w = w;
+    }
+  }
+  const int block_h = line_h * n_lines;
   int ly = y - block_h / 2;
 
   const int symbol_half =
@@ -427,21 +453,10 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   }
   ly = std::max(1, std::min(ly, radar::kSize - block_h - 1));
 
-  if (plane.callsign[0] != '\0') {
-    s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
-    s_draw->drawString(plane.callsign, anchor_x, ly);
-  }
-  ly += line_h;
-
-  if (plane.type[0] != '\0') {
-    s_draw->setTextColor(radar::kColorTagType, radar::kColorBackground);
-    s_draw->drawString(plane.type, anchor_x, ly);
-  }
-  ly += line_h;
-
-  if (plane.alt[0] != '\0') {
-    s_draw->setTextColor(radar::kColorTagAltitude, radar::kColorBackground);
-    s_draw->drawString(plane.alt, anchor_x, ly);
+  for (int i = 0; i < n_lines; ++i) {
+    s_draw->setTextColor(lines[i].color, radar::kColorBackground);
+    s_draw->drawString(lines[i].text, anchor_x, ly);
+    ly += line_h;
   }
 }
 
@@ -453,10 +468,62 @@ struct AircraftDrawItem {
 };
 
 struct BeyondDotDrawItem {
+  size_t index = 0;
   int x = 0;
   int y = 0;
   int dist_sq = 0;
 };
+
+// Screen positions of aircraft from the last draw, for touch hit-testing.
+struct HitTarget {
+  size_t index;
+  int x;
+  int y;
+};
+HitTarget s_hit_targets[services::adsb::kMaxAircraft];
+size_t s_hit_count = 0;
+
+// --- Radar sweep animation ---
+// A green wedge, full intensity at the leading edge fading to 0 over the span,
+// rotating clockwise. Colour #8BF688.
+constexpr int kSweepR = 0x8B;
+constexpr int kSweepG = 0xF6;
+constexpr int kSweepB = 0x88;
+constexpr float kSweepSpanDeg = 25.0f;   // bright front -> 0 over this many deg
+constexpr float kSweepStepDeg = 0.5f;    // radial line spacing
+constexpr float kSweepDegPerSec = 90.0f; // rotation speed (~4 s per revolution)
+constexpr unsigned long kSweepFrameMs = 50;  // ~20 fps cap
+
+float s_sweep_deg = 0.0f;
+unsigned long s_last_sweep_ms = 0;
+
+uint16_t sweepColorForIntensity(float t) {
+  const int r = radar::kBgR + static_cast<int>(lroundf((kSweepR - radar::kBgR) * t));
+  const int g = radar::kBgG + static_cast<int>(lroundf((kSweepG - radar::kBgG) * t));
+  const int b = radar::kBgB + static_cast<int>(lroundf((kSweepB - radar::kBgB) * t));
+  // Match the panel's colour order (same rule as the aircraft colour).
+  if (hardware::board::activePins().rgb_order) {
+    return tft.color565(b, g, r);
+  }
+  return tft.color565(r, g, b);
+}
+
+// Draw the sweep into the current draw target (the compositing buffer).
+void drawSweep(float lead_deg) {
+  const int cx = radar::kCenterX;
+  const int cy = radar::kCenterY;
+  const int radius = radar::kGridOuterRadius;
+  constexpr float kDegToRad = 0.0174532925f;
+  // Far (faint) to near (bright) so the bright leading edge is drawn last.
+  for (float a = kSweepSpanDeg; a >= 0.0f; a -= kSweepStepDeg) {
+    const float t = 1.0f - a / kSweepSpanDeg;  // 0 trailing, 1 leading
+    const uint16_t color = sweepColorForIntensity(t);
+    const float rad = (lead_deg - a) * kDegToRad;
+    const int ex = cx + static_cast<int>(lroundf(sinf(rad) * radius));
+    const int ey = cy - static_cast<int>(lroundf(cosf(rad) * radius));
+    s_draw->drawLine(cx, cy, ex, ey, color);
+  }
+}
 
 void sortDrawItemsFarFirst(AircraftDrawItem* items, size_t count) {
   for (size_t i = 1; i < count; ++i) {
@@ -492,6 +559,7 @@ void drawAircraft() {
   BeyondDotDrawItem dots[services::adsb::kMaxAircraft];
   size_t draw_count = 0;
   size_t dot_count = 0;
+  s_hit_count = 0;
 
   for (size_t i = 0; i < n; ++i) {
     float dx_km = 0.0f;
@@ -508,6 +576,7 @@ void drawAircraft() {
       items[draw_count].y = y;
       items[draw_count].dist_sq = distSqFromCenter(x, y);
       ++draw_count;
+      s_hit_targets[s_hit_count++] = {i, x, y};
       continue;
     }
 
@@ -517,10 +586,12 @@ void drawAircraft() {
                                      &dot_y)) {
       continue;
     }
+    dots[dot_count].index = i;
     dots[dot_count].x = dot_x;
     dots[dot_count].y = dot_y;
     dots[dot_count].dist_sq = distSqFromCenter(dot_x, dot_y);
     ++dot_count;
+    s_hit_targets[s_hit_count++] = {i, dot_x, dot_y};
   }
 
   sortBeyondDotsFarFirst(dots, dot_count);
@@ -669,14 +740,28 @@ bool ensureFrameSprite() {
   return true;
 }
 
-// Double-buffered frame: composite the grid AND aircraft into the off-screen
-// sprite, then blit it to the panel in a single pushSprite. Because the panel
-// is updated in one pass, labels never show an erase/redraw gap — no flicker.
-void renderFrame() {
+// Composite grid + aircraft (+ optional sweep) into s_frame and push once, so
+// the panel updates in a single pass (no flicker).
+void composeFrame(bool with_sweep) {
+  if (!ensureFrameSprite()) {
+    // No buffer: draw straight to the panel (may flicker, last resort).
+    const DrawScope scope(tft);
+    drawStaticGrid(tft);
+    drawAircraft();
+    if (with_sweep) {
+      drawSweep(s_sweep_deg);
+    }
+    tft.setTextDatum(textdatum_t::top_left);
+    return;
+  }
+
   drawStaticGrid(s_frame);  // opens its own DrawScope(s_frame)
   {
     const DrawScope scope(s_frame);
     drawAircraft();
+    if (with_sweep) {
+      drawSweep(s_sweep_deg);
+    }
   }
   s_frame.pushSprite(0, 0);
   tft.setTextDatum(textdatum_t::top_left);
@@ -687,28 +772,163 @@ void renderFrame() {
 void radarDisplayDraw() {
   initPalette();
   initLabelMetrics();
-
-  if (ensureFrameSprite()) {
-    renderFrame();
-    return;
-  }
-
-  // Fallback when the sprite can't be allocated: draw straight to the panel.
-  const DrawScope scope(tft);
-  drawStaticGrid(tft);
-  drawAircraft();
-  tft.setTextDatum(textdatum_t::top_left);
+  composeFrame(true);
 }
 
 void radarDisplayRefreshAircraft() {
   initPalette();
+  composeFrame(true);
+}
 
-  if (ensureFrameSprite()) {
-    renderFrame();
-    return;
+void radarDisplayAnimate() {
+  const unsigned long now = millis();
+  if (s_last_sweep_ms != 0 && now - s_last_sweep_ms < kSweepFrameMs) {
+    return;  // frame-rate cap
+  }
+  const float dt =
+      (s_last_sweep_ms == 0) ? 0.05f : (now - s_last_sweep_ms) / 1000.0f;
+  s_last_sweep_ms = now;
+  s_sweep_deg += kSweepDegPerSec * dt;
+  while (s_sweep_deg >= 360.0f) {
+    s_sweep_deg -= 360.0f;
   }
 
-  radarDisplayDraw();
+  // One composited, flicker-free frame: cached grid + aircraft + sweep.
+  composeFrame(true);
+}
+
+int radarDisplayHitTest(int x, int y) {
+  constexpr int kTapRadius = 26;
+  constexpr int kTapRadiusSq = kTapRadius * kTapRadius;
+  int best = -1;
+  int best_sq = kTapRadiusSq + 1;
+  for (size_t i = 0; i < s_hit_count; ++i) {
+    const int dx = s_hit_targets[i].x - x;
+    const int dy = s_hit_targets[i].y - y;
+    const int d2 = dx * dx + dy * dy;
+    if (d2 <= kTapRadiusSq && d2 < best_sq) {
+      best_sq = d2;
+      best = static_cast<int>(s_hit_targets[i].index);
+    }
+  }
+  return best;
+}
+
+void radarDisplayDrawDialog(int aircraft_index,
+                            const services::route::RouteInfo* route) {
+  const size_t n = services::adsb::aircraftCount();
+  if (aircraft_index < 0 || static_cast<size_t>(aircraft_index) >= n) {
+    return;
+  }
+  const services::adsb::Aircraft& ac =
+      services::adsb::aircraftList()[static_cast<size_t>(aircraft_index)];
+
+  float dx_km = 0.0f;
+  float dy_km = 0.0f;
+  float dist_km = 0.0f;
+  offsetKmFromCenter(ac.lat, ac.lon, &dx_km, &dy_km, &dist_km);
+
+  // Title (callsign) plus one line per enabled detail field.
+  char title[16];
+  snprintf(title, sizeof(title), "%s",
+           ac.callsign[0] != '\0' ? ac.callsign : "(no id)");
+
+  char lines[10][28];
+  int nl = 0;
+  using ui::radar::DialogField;
+  if (ui::radar::dialogFieldEnabled(DialogField::kAirline) &&
+      ac.airline != nullptr) {
+    snprintf(lines[nl++], sizeof(lines[0]), "%s", ac.airline->name);
+  }
+  if (ui::radar::dialogFieldEnabled(DialogField::kRoute) && route != nullptr &&
+      route->valid) {
+    if (route->origin_city[0] != '\0') {
+      snprintf(lines[nl++], sizeof(lines[0]), "%s %s", route->origin_code,
+               route->origin_city);
+    } else {
+      snprintf(lines[nl++], sizeof(lines[0]), "%s", route->origin_code);
+    }
+    if (route->dest_city[0] != '\0') {
+      snprintf(lines[nl++], sizeof(lines[0]), "-> %s %s", route->dest_code,
+               route->dest_city);
+    } else {
+      snprintf(lines[nl++], sizeof(lines[0]), "-> %s", route->dest_code);
+    }
+  }
+  if (ui::radar::dialogFieldEnabled(DialogField::kType) && ac.type[0] != '\0') {
+    snprintf(lines[nl++], sizeof(lines[0]), "Type: %s", ac.type);
+  }
+  if (ui::radar::dialogFieldEnabled(DialogField::kAltitude) &&
+      ac.alt[0] != '\0') {
+    snprintf(lines[nl++], sizeof(lines[0]), "Alt: %s", ac.alt);
+  }
+  if (ui::radar::dialogFieldEnabled(DialogField::kSpeed)) {
+    snprintf(lines[nl++], sizeof(lines[0]), "Spd: %d kt",
+             static_cast<int>(lroundf(ac.gs_knots)));
+  }
+  if (ui::radar::dialogFieldEnabled(DialogField::kTrack)) {
+    snprintf(lines[nl++], sizeof(lines[0]), "Trk: %d deg",
+             static_cast<int>(lroundf(ac.track_deg)));
+  }
+  if (ui::radar::dialogFieldEnabled(DialogField::kDistance)) {
+    if (ui::radar::useMiles()) {
+      snprintf(lines[nl++], sizeof(lines[0]), "Dist: %.1f mi",
+               dist_km / 1.609344f);
+    } else {
+      snprintf(lines[nl++], sizeof(lines[0]), "Dist: %.1f km", dist_km);
+    }
+  }
+  if (ui::radar::dialogFieldEnabled(DialogField::kPosition)) {
+    snprintf(lines[nl++], sizeof(lines[0]), "%.3f, %.3f", ac.lat, ac.lon);
+  }
+
+  // Blank the screen to de-clutter, then draw the details centred.
+  initTagLabelMetrics();
+  initPalette();
+  const DrawScope scope(tft);
+  displayFontEnsureLoaded(tft);
+  tft.fillScreen(radar::kColorBackground);
+  tft.setTextDatum(textdatum_t::middle_center);
+
+  const int cx = radar::kCenterX;
+
+  const float scale = ui::radar::dialogTextScale();
+  auto setTitleFont = [scale]() {
+    if (displayFontIsSmooth()) {
+      displayFontSetSmoothSize(tft, 1.6f * scale);
+    } else {
+      displayFontSetBitmap(tft, &fonts::FreeSansBold12pt7b);
+    }
+  };
+  auto setBodyFont = [scale]() {
+    if (displayFontIsSmooth()) {
+      displayFontSetSmoothSize(tft, 1.1f * scale);
+    } else {
+      displayFontSetBitmap(tft, &fonts::FreeSansBold9pt7b);
+    }
+  };
+
+  setTitleFont();
+  const int title_h = tft.fontHeight();
+  setBodyFont();
+  const int body_h = tft.fontHeight();
+
+  const int total_h = title_h + nl * body_h;
+  int y = radar::kCenterY - total_h / 2 + title_h / 2;
+
+  setTitleFont();
+  tft.setTextColor(radar::kColorLabel, radar::kColorBackground);
+  tft.drawString(title, cx, y);
+  y += title_h / 2 + body_h / 2;
+
+  setBodyFont();
+  for (int i = 0; i < nl; ++i) {
+    tft.setTextColor(radar::kColorLabel, radar::kColorBackground);
+    tft.drawString(lines[i], cx, y);
+    y += body_h;
+  }
+
+  tft.setTextDatum(textdatum_t::top_left);
 }
 
 }  // namespace ui

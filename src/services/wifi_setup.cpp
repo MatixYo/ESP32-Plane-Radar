@@ -14,6 +14,7 @@
 #endif
 
 #include "config.h"
+#include "hardware/board.h"
 #include "services/radar_location.h"
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
@@ -84,6 +85,88 @@ char s_runways_checkbox_attrs[32] = "type=\"checkbox\"";
 WiFiManagerParameter s_param_runways("show_runways", "Show airport runways", "T", 2,
                                      s_runways_checkbox_attrs, WFM_LABEL_AFTER);
 
+// Airline label selector. Custom-HTML-only param renders a <select
+// name="airline_mode">; the value is read back from the web server on save.
+char s_airline_select_html[320] = "";
+WiFiManagerParameter s_param_airline(s_airline_select_html);
+
+// Flight dialog detail checkboxes. Custom-HTML-only param renders one checkbox
+// per DialogField; each is read back from the web server on save.
+char s_dialog_fields_html[640] = "";
+WiFiManagerParameter s_param_dialog_fields(s_dialog_fields_html);
+
+constexpr char kScaleInputAttrs[] =
+    " type=\"number\" step=\"0.1\" min=\"0.5\" max=\"3\"";
+WiFiManagerParameter s_param_dlg_scale("dlg_scale", "Dialog text scale", "1.0", 6,
+                                       kScaleInputAttrs);
+
+constexpr char kFetchInputAttrs[] =
+    " type=\"number\" step=\"1\" min=\"3\" max=\"30\"";
+WiFiManagerParameter s_param_fetch("fetch_sec", "ADS-B fetch interval (s)", "3", 4,
+                                   kFetchInputAttrs);
+
+// Board selector. Custom-HTML-only param renders a <select name="board">; the
+// posted value is read back directly from the web server (see onPortalParamsSaved).
+char s_board_select_html[320] = "";
+WiFiManagerParameter s_param_board(s_board_select_html);
+
+// Set when the board changes via the portal; wifiLoop reboots to re-init the
+// display with the new pins after the HTTP response has been sent.
+unsigned long s_reboot_at_ms = 0;
+
+void buildBoardSelectHtml() {
+  const uint8_t cur = static_cast<uint8_t>(hardware::board::active());
+  int n = snprintf(s_board_select_html, sizeof(s_board_select_html),
+                   "<br/><label for='board'>Board</label>"
+                   "<select name='board' id='board'>");
+  for (uint8_t i = 0; i < hardware::board::kBoardCount && n > 0 &&
+                      n < static_cast<int>(sizeof(s_board_select_html));
+       ++i) {
+    n += snprintf(s_board_select_html + n, sizeof(s_board_select_html) - n,
+                  "<option value='%u'%s>%s</option>", i,
+                  i == cur ? " selected" : "",
+                  hardware::board::name(static_cast<hardware::board::Board>(i)));
+  }
+  if (n > 0 && n < static_cast<int>(sizeof(s_board_select_html))) {
+    snprintf(s_board_select_html + n, sizeof(s_board_select_html) - n, "</select>");
+  }
+}
+
+void buildAirlineSelectHtml() {
+  const uint8_t cur = static_cast<uint8_t>(ui::radar::airlineDisplay());
+  const char* options[] = {"None", "Full Airline Name", "Airline Abbreviation"};
+  int n = snprintf(s_airline_select_html, sizeof(s_airline_select_html),
+                   "<br/><label for='airline_mode'>Show:</label>"
+                   "<select name='airline_mode' id='airline_mode'>");
+  for (uint8_t i = 0; i < 3 && n > 0 &&
+                      n < static_cast<int>(sizeof(s_airline_select_html));
+       ++i) {
+    n += snprintf(s_airline_select_html + n, sizeof(s_airline_select_html) - n,
+                  "<option value='%u'%s>%s</option>", i,
+                  i == cur ? " selected" : "", options[i]);
+  }
+  if (n > 0 && n < static_cast<int>(sizeof(s_airline_select_html))) {
+    snprintf(s_airline_select_html + n, sizeof(s_airline_select_html) - n,
+             "</select>");
+  }
+}
+
+void buildDialogFieldsHtml() {
+  int n = snprintf(s_dialog_fields_html, sizeof(s_dialog_fields_html),
+                   "<br/><label>Flight dialog details:</label><br/>");
+  for (uint8_t i = 0;
+       i < static_cast<uint8_t>(ui::radar::DialogField::kCount) && n > 0 &&
+       n < static_cast<int>(sizeof(s_dialog_fields_html));
+       ++i) {
+    const auto field = static_cast<ui::radar::DialogField>(i);
+    n += snprintf(s_dialog_fields_html + n, sizeof(s_dialog_fields_html) - n,
+                  "<input type='checkbox' name='%s'%s> %s<br/>",
+                  ui::radar::dialogFieldId(field),
+                  ui::radar::dialogFieldEnabled(field) ? " checked" : "",
+                  ui::radar::dialogFieldLabel(field));
+  }
+}
+
 void refreshPortalParamDefaults() {
   char lat_buf[kCoordParamLen + 1];
   char lon_buf[kCoordParamLen + 1];
@@ -97,6 +180,37 @@ void refreshPortalParamDefaults() {
   snprintf(s_runways_checkbox_attrs, sizeof(s_runways_checkbox_attrs),
            "type=\"checkbox\"%s", ui::radar::showRunways() ? " checked" : "");
   s_param_runways.setValue("T", 2);
+  buildAirlineSelectHtml();
+  buildDialogFieldsHtml();
+  char scale_buf[8];
+  snprintf(scale_buf, sizeof(scale_buf), "%.1f", ui::radar::dialogTextScale());
+  s_param_dlg_scale.setValue(scale_buf, 6);
+  char fetch_buf[6];
+  snprintf(fetch_buf, sizeof(fetch_buf), "%d", ui::radar::adsbFetchIntervalSec());
+  s_param_fetch.setValue(fetch_buf, 4);
+  buildBoardSelectHtml();
+}
+
+void saveBoardFromPortal() {
+  if (!s_wm.server) {
+    return;
+  }
+  const String value = s_wm.server->arg("board");
+  if (value.length() == 0) {
+    return;
+  }
+  const long sel = value.toInt();
+  if (!hardware::board::isValidIndex(sel)) {
+    return;
+  }
+  const auto chosen = static_cast<hardware::board::Board>(sel);
+  if (chosen == hardware::board::active()) {
+    return;
+  }
+  hardware::board::setActive(chosen);
+  Serial.printf("Board set to %s — rebooting to apply\n",
+                hardware::board::name(chosen));
+  s_reboot_at_ms = millis() + 1200;  // let the HTTP response flush first
 }
 
 void onPortalParamsSaved() {
@@ -106,6 +220,22 @@ void onPortalParamsSaved() {
   }
   ui::radar::saveMilesFromPortal(s_param_miles.getValue());
   ui::radar::saveRunwaysFromPortal(s_param_runways.getValue());
+  if (s_wm.server) {
+    ui::radar::saveAirlineDisplayFromPortal(
+        s_wm.server->arg("airline_mode").c_str());
+    uint16_t dialog_mask = 0;
+    for (uint8_t i = 0; i < static_cast<uint8_t>(ui::radar::DialogField::kCount);
+         ++i) {
+      const auto field = static_cast<ui::radar::DialogField>(i);
+      if (s_wm.server->hasArg(ui::radar::dialogFieldId(field))) {
+        dialog_mask |= (1u << i);
+      }
+    }
+    ui::radar::setDialogFieldsMask(dialog_mask);
+  }
+  ui::radar::saveDialogTextScaleFromPortal(s_param_dlg_scale.getValue());
+  ui::radar::saveFetchIntervalFromPortal(s_param_fetch.getValue());
+  saveBoardFromPortal();
 }
 
 void attachPortalParams(WiFiManager& wm) {
@@ -114,6 +244,11 @@ void attachPortalParams(WiFiManager& wm) {
   wm.addParameter(&s_param_lon);
   wm.addParameter(&s_param_miles);
   wm.addParameter(&s_param_runways);
+  wm.addParameter(&s_param_airline);
+  wm.addParameter(&s_param_dialog_fields);
+  wm.addParameter(&s_param_dlg_scale);
+  wm.addParameter(&s_param_fetch);
+  wm.addParameter(&s_param_board);
   wm.setSaveParamsCallback(onPortalParamsSaved);
 }
 
@@ -416,6 +551,10 @@ bool wifiReconnect() {
 }
 
 void wifiLoop() {
+  if (s_reboot_at_ms != 0 && millis() >= s_reboot_at_ms) {
+    Serial.println("Rebooting to apply board change...");
+    esp_restart();
+  }
   ensureWifiManager();
   if (wifiLinkUp()) {
     if (!s_wm.getWebPortalActive() && !s_wm.getConfigPortalActive()) {

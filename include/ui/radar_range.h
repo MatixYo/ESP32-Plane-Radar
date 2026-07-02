@@ -43,11 +43,50 @@ uint8_t rangeIndex();
 /** ADSB fetch radius (km): scaled to screen edge so beyond-ring dots have data. */
 float fetchRadiusKm();
 
+/** How to label aircraft with their airline (portal "Show:" selector). */
+enum class AirlineDisplay : uint8_t {
+  kNone = 0,      // don't show airline
+  kFullName = 1,  // e.g. "British Airways"
+  kAbbrev = 2,    // friendly short name, e.g. "Virgin"
+};
+
+/** Detail fields shown in the tap-to-open flight dialog (each toggle in portal). */
+enum class DialogField : uint8_t {
+  kAirline = 0,
+  kType,
+  kAltitude,
+  kSpeed,
+  kTrack,
+  kDistance,
+  kPosition,
+  kRoute,  // departure/arrival airports (looked up on tap)
+  kCount,
+};
+
+bool dialogFieldEnabled(DialogField field);
+uint16_t dialogFieldsMask();
+void setDialogFieldsMask(uint16_t mask);
+/** Multiplier on the flight dialog text size (1.0 = base size). */
+float dialogTextScale();
+void saveDialogTextScaleFromPortal(const char* value);
+
+/** ADS-B poll interval. Configurable (3-30 s); persisted to NVS. */
+unsigned long adsbFetchIntervalMs();
+int adsbFetchIntervalSec();
+void saveFetchIntervalFromPortal(const char* value);
+/** Portal form field name (e.g. "dlg_alt") for a dialog field. */
+const char* dialogFieldId(DialogField field);
+/** Human label (e.g. "Altitude") for a dialog field. */
+const char* dialogFieldLabel(DialogField field);
+
 bool useMiles();
 bool showRunways();
+AirlineDisplay airlineDisplay();
 /** WiFi portal checkbox: "T" = miles, otherwise km. */
 void saveMilesFromPortal(const char* checkbox_value);
 void saveRunwaysFromPortal(const char* checkbox_value);
+/** WiFi portal select: "0" none, "1" full name, "2" abbreviation. */
+void saveAirlineDisplayFromPortal(const char* select_value);
 void formatRing3Label(char* buf, size_t len, float ring3_km, bool use_miles);
 void formatCurrentRing3Label(char* buf, size_t len);
 /** Reset distance units to km (e.g. with WiFi credential wipe). */
