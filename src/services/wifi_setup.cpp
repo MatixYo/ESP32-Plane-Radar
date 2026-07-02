@@ -14,6 +14,7 @@
 #endif
 
 #include "config.h"
+#include "services/hostname.h"
 #include "services/radar_location.h"
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
@@ -84,6 +85,15 @@ char s_runways_checkbox_attrs[32] = "type=\"checkbox\"";
 WiFiManagerParameter s_param_runways("show_runways", "Show airport runways", "T", 2,
                                      s_runways_checkbox_attrs, WFM_LABEL_AFTER);
 
+WiFiManagerParameter s_param_hostname_sep("<hr/>");
+
+constexpr int kHostnameParamLen = 32;
+constexpr char kHostnameInputAttrs[] =
+    " maxlength=\"32\" pattern=\"[A-Za-z0-9-]{1,32}\"";
+
+WiFiManagerParameter s_param_hostname("mdns_host", "Device name (mDNS: <name>.local)", "",
+                                      kHostnameParamLen, kHostnameInputAttrs);
+
 void refreshPortalParamDefaults() {
   char lat_buf[kCoordParamLen + 1];
   char lon_buf[kCoordParamLen + 1];
@@ -97,6 +107,7 @@ void refreshPortalParamDefaults() {
   snprintf(s_runways_checkbox_attrs, sizeof(s_runways_checkbox_attrs),
            "type=\"checkbox\"%s", ui::radar::showRunways() ? " checked" : "");
   s_param_runways.setValue("T", 2);
+  s_param_hostname.setValue(services::hostname::value(), kHostnameParamLen);
 }
 
 void onPortalParamsSaved() {
@@ -106,6 +117,17 @@ void onPortalParamsSaved() {
   }
   ui::radar::saveMilesFromPortal(s_param_miles.getValue());
   ui::radar::saveRunwaysFromPortal(s_param_runways.getValue());
+
+  if (!services::hostname::saveFromString(s_param_hostname.getValue())) {
+    Serial.println("Invalid hostname in portal — keeping previous");
+  } else {
+#ifdef WM_MDNS
+    MDNS.end();
+    if (MDNS.begin(services::hostname::value())) {
+      MDNS.addService("http", "tcp", 80);
+    }
+#endif
+  }
 }
 
 void attachPortalParams(WiFiManager& wm) {
@@ -114,6 +136,8 @@ void attachPortalParams(WiFiManager& wm) {
   wm.addParameter(&s_param_lon);
   wm.addParameter(&s_param_miles);
   wm.addParameter(&s_param_runways);
+  wm.addParameter(&s_param_hostname_sep);
+  wm.addParameter(&s_param_hostname);
   wm.setSaveParamsCallback(onPortalParamsSaved);
 }
 
@@ -191,17 +215,18 @@ void resetWifiCredentials() {
   eraseWifiCredentials();
   services::location::clear();
   ui::radar::unitsReset();
-  Serial.println("WiFi credentials, location, and units cleared");
+  services::hostname::clear();
+  Serial.println("WiFi credentials, location, units, and hostname cleared");
 }
 
 void onConfigPortalApStarted(WiFiManager*) {
   WiFi.setTxPower(WIFI_POWER_8_5dBm);
   statusScreenPortal();
 #ifdef WM_MDNS
-  if (MDNS.begin(config::kPortalHostname)) {
+  if (MDNS.begin(services::hostname::value())) {
     MDNS.addService("http", "tcp", 80);
     Serial.printf("Setup portal: http://%s.local (or http://%s)\n",
-                  config::kPortalHostname, config::kPortalIp);
+                  services::hostname::value(), config::kPortalIp);
   } else {
     Serial.printf("Setup portal: http://%s (mDNS unavailable)\n", config::kPortalIp);
   }
@@ -222,7 +247,7 @@ void ensureWifiManager() {
   s_wm.setConfigPortalTimeout(config::kWifiPortalTimeoutSec);
   s_wm.setAPStaticIPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1),
                            IPAddress(255, 255, 255, 0));
-  s_wm.setHostname(config::kPortalHostname);
+  s_wm.setHostname(services::hostname::value());
   s_wm.setAPCallback(onConfigPortalApStarted);
   attachPortalParams(s_wm);
   s_wm_configured = true;
@@ -238,13 +263,13 @@ void startLanWebPortal() {
   s_wm.setConfigPortalBlocking(false);
 #ifdef WM_MDNS
   MDNS.end();
-  if (MDNS.begin(config::kPortalHostname)) {
+  if (MDNS.begin(services::hostname::value())) {
     MDNS.addService("http", "tcp", 80);
   }
 #endif
   s_wm.startWebPortal();
   Serial.printf("LAN config: http://%s.local or http://%s\n",
-                config::kPortalHostname, WiFi.localIP().toString().c_str());
+                services::hostname::value(), WiFi.localIP().toString().c_str());
 }
 
 void stopLanWebPortal() {
