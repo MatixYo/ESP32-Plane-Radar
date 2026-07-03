@@ -1,15 +1,18 @@
 /**
- * Plane Radar — WiFi setup, then radar UI on the round GC9A01 display.
+ * Plane Radar — WiFi setup, then radar UI on the round display.
  */
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <esp_system.h>
 
 #include "config.h"
 #include "hardware/display.h"
+#include "hardware/touch_gesture.h"
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
 #include "services/wifi_setup.h"
+#include "ui/radar_color_mode.h"
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
@@ -30,8 +33,7 @@ void showRadarIfConnected() {
   g_radar_visible = true;
 }
 
-void onRangeTap() {
-  ui::radar::rangeNext();
+void onRangeChanged() {
   char range_label[12];
   ui::radar::formatCurrentRing3Label(range_label, sizeof(range_label));
   Serial.printf("Range: %s (outer ~%.0f km)\n", range_label,
@@ -42,10 +44,37 @@ void onRangeTap() {
   }
 }
 
+void onRangeTap() {
+  ui::radar::rangeNext();
+  onRangeChanged();
+}
+
 void handleBootButton() {
   bootButtonPollLongPress();
   if (bootButtonConsumeTap()) {
     onRangeTap();
+  }
+}
+
+void onColorModeChanged() {
+  if (g_radar_visible && WiFi.status() == WL_CONNECTED) {
+    ui::radarDisplayDraw();
+  }
+}
+
+void handleTouchGestures() {
+  const TouchGestureEvent touch = touchGesturePoll();
+  if (touch.color_mode_toggle) {
+    ui::radar::colorModeToggle();
+    onColorModeChanged();
+    return;
+  }
+  if (touch.pinch_zoom > 0) {
+    ui::radar::rangeNext();
+    onRangeChanged();
+  } else if (touch.pinch_zoom < 0) {
+    ui::radar::rangePrev();
+    onRangeChanged();
   }
 }
 
@@ -54,10 +83,12 @@ void fetchAndDrawAircraft() {
   if (!services::adsb::fetchUpdate(services::location::lat(),
                                    services::location::lon(), fetch_km)) {
     handleBootButton();
+    handleTouchGestures();
     return;
   }
   ui::radarDisplayRefreshAircraft();
   handleBootButton();
+  handleTouchGestures();
 }
 
 }  // namespace
@@ -66,10 +97,13 @@ void setup() {
   Serial.begin(115200);
   delay(500);
   Serial.println();
-  Serial.println("Plane Radar");
+  Serial.printf("Plane Radar v%s\n", config::kFirmwareVersion);
+  Serial.printf("Reset reason: %d\n", static_cast<int>(esp_reset_reason()));
 
   bootButtonInit();
   displayInit();
+  displayBacklightOn();
+  touchGestureInit();
   if (wifiShowsSetupScreenOnBoot()) {
     statusScreenPortal();
   }
@@ -79,11 +113,16 @@ void setup() {
 
   if (wifiSetupConnect()) {
     showRadarIfConnected();
+    if (g_radar_visible) {
+      fetchAndDrawAircraft();
+    }
   }
+  bootButtonEnableWifiReset();
 }
 
 void loop() {
   handleBootButton();
+  handleTouchGestures();
   wifiLoop();
 
   if (WiFi.status() != WL_CONNECTED) {

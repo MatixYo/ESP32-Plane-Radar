@@ -1,6 +1,7 @@
 #include "services/adsb_client.h"
 
 #include <HTTPClient.h>
+#include <WiFi.h>
 #include <WiFiClientSecure.h>
 
 #include <ArduinoJson.h>
@@ -195,6 +196,24 @@ void fillTagFields(Aircraft* ac, const JsonObject& plane) {
 
   copyJsonStringTrimmed(plane, "t", ac->type, sizeof(ac->type));
   formatAltitudeTag(plane, ac->alt, sizeof(ac->alt));
+}
+
+void buildAircraftJsonFilter(JsonDocument& filter) {
+  JsonObject ac0 = filter["ac"][0].to<JsonObject>();
+  ac0["lat"] = true;
+  ac0["lon"] = true;
+  ac0["flight"] = true;
+  ac0["hex"] = true;
+  ac0["t"] = true;
+  ac0["alt_baro"] = true;
+  ac0["alt_geom"] = true;
+  ac0["true_heading"] = true;
+  ac0["mag_heading"] = true;
+  ac0["track"] = true;
+  ac0["dir"] = true;
+  ac0["gs"] = true;
+  ac0["tas"] = true;
+  ac0["ias"] = true;
 }
 
 }  // namespace

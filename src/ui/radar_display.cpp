@@ -11,11 +11,12 @@
 #include "hardware/display_font.h"
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
+#include "ui/radar_color_mode.h"
+#include "ui/radar_geo.h"
 #include "ui/radar_range.h"
+#include "ui/radar_runways.h"
 #include "ui/radar_theme.h"
 #include "ui/runway_overlay.h"
-
-namespace fonts = lgfx::v1::fonts;
 
 namespace ui {
 namespace radar {
@@ -175,39 +176,59 @@ void initTagLabelMetrics() {
 }
 
 void initPalette() {
-  radar::kColorBackground = tft.color565(radar::kBgR, radar::kBgG, radar::kBgB);
-  radar::kColorGrid = tft.color565(radar::kGridR, radar::kGridG, radar::kGridB);
-  radar::kColorLabel = tft.color565(255, 255, 255);
-  radar::kColorCenter = tft.color565(255, 255, 255);
+  const bool day = radar::isDayMode();
+  const uint8_t bg_r = day ? radar::kDayBgR : radar::kBgR;
+  const uint8_t bg_g = day ? radar::kDayBgG : radar::kBgG;
+  const uint8_t bg_b = day ? radar::kDayBgB : radar::kBgB;
+  const uint8_t grid_r = day ? radar::kDayGridR : radar::kGridR;
+  const uint8_t grid_g = day ? radar::kDayGridG : radar::kGridG;
+  const uint8_t grid_b = day ? radar::kDayGridB : radar::kGridB;
+  const uint8_t label_r = day ? radar::kDayLabelR : radar::kLabelR;
+  const uint8_t label_g = day ? radar::kDayLabelG : radar::kLabelG;
+  const uint8_t label_b = day ? radar::kDayLabelB : radar::kLabelB;
+  const uint8_t ac_r = day ? radar::kDayAircraftR : radar::kAircraftR;
+  const uint8_t ac_g = day ? radar::kDayAircraftG : radar::kAircraftG;
+  const uint8_t ac_b = day ? radar::kDayAircraftB : radar::kAircraftB;
+  const uint8_t tr_r = day ? radar::kDayTrackR : radar::kTrackR;
+  const uint8_t tr_g = day ? radar::kDayTrackG : radar::kTrackG;
+  const uint8_t tr_b = day ? radar::kDayTrackB : radar::kTrackB;
+  const uint8_t tt_r = day ? radar::kDayTagTypeR : radar::kTagTypeR;
+  const uint8_t tt_g = day ? radar::kDayTagTypeG : radar::kTagTypeG;
+  const uint8_t tt_b = day ? radar::kDayTagTypeB : radar::kTagTypeB;
+  const uint8_t ta_r = day ? radar::kDayTagAltR : radar::kTagAltR;
+  const uint8_t ta_g = day ? radar::kDayTagAltG : radar::kTagAltG;
+  const uint8_t ta_b = day ? radar::kDayTagAltB : radar::kTagAltB;
+  const uint8_t rw_r = day ? radar::kDayRunwayR : radar::kRunwayR;
+  const uint8_t rw_g = day ? radar::kDayRunwayG : radar::kRunwayG;
+  const uint8_t rw_b = day ? radar::kDayRunwayB : radar::kRunwayB;
+  const uint8_t rwl_r = day ? radar::kDayRunwayLabelR : radar::kRunwayLabelR;
+  const uint8_t rwl_g = day ? radar::kDayRunwayLabelG : radar::kRunwayLabelG;
+  const uint8_t rwl_b = day ? radar::kDayRunwayLabelB : radar::kRunwayLabelB;
+
+  radar::kColorBackground = tft.color565(bg_r, bg_g, bg_b);
+  radar::kColorGrid = tft.color565(grid_r, grid_g, grid_b);
+  radar::kColorLabel = tft.color565(label_r, label_g, label_b);
+  radar::kColorCenter = tft.color565(label_r, label_g, label_b);
   // GC9A01 BGR panel: swap R/B in color565 so logical red renders red on screen.
   if (config::kDisplayRgbOrder) {
-    radar::kColorAircraft =
-        tft.color565(radar::kAircraftB, radar::kAircraftG, radar::kAircraftR);
+    radar::kColorAircraft = tft.color565(ac_b, ac_g, ac_r);
   } else {
-    radar::kColorAircraft =
-        tft.color565(radar::kAircraftR, radar::kAircraftG, radar::kAircraftB);
+    radar::kColorAircraft = tft.color565(ac_r, ac_g, ac_b);
   }
-  radar::kColorTrackVector =
-      tft.color565(radar::kTrackR, radar::kTrackG, radar::kTrackB);
-  radar::kColorTagType =
-      tft.color565(radar::kTagTypeR, radar::kTagTypeG, radar::kTagTypeB);
-  radar::kColorTagAltitude =
-      tft.color565(radar::kTagAltR, radar::kTagAltG, radar::kTagAltB);
-  radar::kColorRunway =
-      tft.color565(radar::kRunwayR, radar::kRunwayG, radar::kRunwayB);
-  radar::kColorRunwayLabel = tft.color565(radar::kRunwayLabelR, radar::kRunwayLabelG,
-                                          radar::kRunwayLabelB);
+  radar::kColorTrackVector = tft.color565(tr_r, tr_g, tr_b);
+  radar::kColorTagType = tft.color565(tt_r, tt_g, tt_b);
+  radar::kColorTagAltitude = tft.color565(ta_r, ta_g, ta_b);
+  radar::kColorRunway = tft.color565(rw_r, rw_g, rw_b);
+  radar::kColorRunwayLabel = tft.color565(rwl_r, rwl_g, rwl_b);
 }
-
-constexpr float kKmPerDeg = 111.0f;
 
 void offsetKmFromCenter(float lat, float lon, float* dx_km, float* dy_km,
                         float* dist_km) {
-  *dx_km =
-      static_cast<float>(lon - services::location::lon()) * kKmPerDeg;
-  *dy_km =
-      static_cast<float>(lat - services::location::lat()) * kKmPerDeg;
-  *dist_km = sqrtf((*dx_km) * (*dx_km) + (*dy_km) * (*dy_km));
+  radar::geo::offsetKmFromCenter(lat, lon, dx_km, dy_km, dist_km);
+}
+
+void latLonToScreen(float lat, float lon, int* out_x, int* out_y) {
+  radar::geo::latLonToScreen(lat, lon, out_x, out_y);
 }
 
 float innerRingMaxKm() {
@@ -215,20 +236,6 @@ float innerRingMaxKm() {
   return outer_km * (static_cast<float>(radar::kGridOuterRadius -
                                        radar::kAircraftInsideRingInsetPx) /
                      static_cast<float>(radar::kGridOuterRadius));
-}
-
-/** Flat lat/lon as x/y: 1° ≈ 111 km, north = screen up. */
-void latLonToScreen(float lat, float lon, int* out_x, int* out_y) {
-  const float outer_km = radar::rangeCurrent().outer_km;
-  const float px_per_km = static_cast<float>(radar::kGridOuterRadius) / outer_km;
-
-  float dx_km = 0.0f;
-  float dy_km = 0.0f;
-  float dist_km = 0.0f;
-  offsetKmFromCenter(lat, lon, &dx_km, &dy_km, &dist_km);
-
-  *out_x = radar::kCenterX + static_cast<int>(lroundf(dx_km * px_per_km));
-  *out_y = radar::kCenterY - static_cast<int>(lroundf(dy_km * px_per_km));
 }
 
 bool isInsideOuterRingKm(float dist_km) { return dist_km <= innerRingMaxKm(); }
@@ -648,8 +655,8 @@ void drawStaticGrid(Gfx& gfx) {
   gfx.fillScreen(radar::kColorBackground);
   drawRings(cx, cy, grid_r);
   drawCrosshairs(cx, cy, grid_r, radar::kColorGrid);
-  initPalette();
   runway::drawLargeAirportRunways(gfx);
+  radar::drawRunways(gfx);
   drawCenterDot(cx, cy);
   drawCardinalLabels();
   drawScaleLabel(cx, cy, grid_r);

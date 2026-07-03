@@ -14,5 +14,9 @@ bool wifiBootButtonPressed();
 void bootButtonInit();
 /** Latched short tap (survives blocking HTTP/display work). */
 bool bootButtonConsumeTap();
+/** Call after setup WiFi flow so long-press reset cannot interrupt the portal. */
+void bootButtonEnableWifiReset();
+/** True while the captive setup portal is active. */
+bool wifiConfigPortalActive();
 /** Call each loop iteration; triggers WiFi reset on long hold. */
 void bootButtonPollLongPress();

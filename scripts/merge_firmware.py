@@ -15,7 +15,7 @@ def merge_firmware(source, target, env):
     boot_app0 = join(framework_dir, "tools", "partitions", "boot_app0.bin")
     merged = join(build_dir, "firmware-merged.bin")
     mcu = env.BoardConfig().get("build.mcu", "esp32c3")
-    flash_size = env.BoardConfig().get("upload.flash_size", "4MB")
+    flash_size = env.GetProjectOption("board_build.flash_size") or env.BoardConfig().get("upload.flash_size", "4MB")
 
     bootloader = join(build_dir, "bootloader.bin")
     partitions = join(build_dir, "partitions.bin")

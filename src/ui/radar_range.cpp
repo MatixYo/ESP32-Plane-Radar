@@ -1,5 +1,6 @@
 #include "ui/radar_range.h"
 
+#include "ui/radar_color_mode.h"
 #include "ui/radar_theme.h"
 
 #include <Preferences.h>
@@ -71,10 +72,17 @@ void rangeInit() {
   s_use_miles = s_prefs.getBool(kPrefsMilesKey, false);
   s_show_runways = s_prefs.getBool(kPrefsRunwaysKey, true);
   s_prefs.end();
+  colorModeInit();
 }
 
 void rangeNext() {
   s_range_index = static_cast<uint8_t>((s_range_index + 1) % kRangePresetCount);
+  saveRangeIndex();
+}
+
+void rangePrev() {
+  s_range_index = static_cast<uint8_t>(
+      (s_range_index + kRangePresetCount - 1) % kRangePresetCount);
   saveRangeIndex();
 }
 
