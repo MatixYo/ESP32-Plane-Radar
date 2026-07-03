@@ -55,10 +55,14 @@ constexpr gpio_num_t kDisplayPinBl =
 constexpr int kDisplayWidth = kBoardOnx3248g035 ? 320 : 240;
 constexpr int kDisplayHeight = kBoardOnx3248g035 ? 480 : 240;
 
-constexpr int kRadarViewportSize = kDisplayWidth < 240 ? kDisplayWidth : 240;
+constexpr int kRadarViewportSize = kBoardOnx3248g035 ? kDisplayWidth :
+                                  (kDisplayWidth < 240 ? kDisplayWidth : 240);
 constexpr int kRadarViewportX = (kDisplayWidth - kRadarViewportSize) / 2;
-constexpr int kRadarViewportY = (kDisplayHeight - kRadarViewportSize) / 2;
+constexpr int kRadarViewportY =
+    kBoardOnx3248g035 ? 0 : (kDisplayHeight - kRadarViewportSize) / 2;
 constexpr bool kFrameSpriteUsePsram = kBoardOnx3248g035;
+constexpr bool kRadarInfoPanelEnabled = kBoardOnx3248g035;
+constexpr int kRadarInfoPanelY = 330;
 
 constexpr uint32_t kDisplaySpiWriteHz =
     kBoardOnx3248g035 ? 40000000 : 40000000;

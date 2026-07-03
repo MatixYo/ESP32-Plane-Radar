@@ -2,8 +2,11 @@
 
 #include <lgfx/v1/lgfx_fonts.hpp>
 
+#include <Arduino.h>
+
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 
 #include "config.h"
@@ -15,7 +18,7 @@
 #include "ui/radar_theme.h"
 #include "ui/runway_overlay.h"
 
-namespace fonts = lgfx::v1::fonts;
+namespace lgfx_fonts = lgfx::v1::fonts;
 
 namespace ui {
 namespace radar {
@@ -30,6 +33,7 @@ uint16_t kColorTagType = 0x5DFF;
 uint16_t kColorTagAltitude = 0xFFE0;
 uint16_t kColorRunway = 0x4D5F;
 uint16_t kColorRunwayLabel = 0x7DFF;
+uint16_t kColorInfoMuted = 0xC618;
 
 }  // namespace radar
 
@@ -38,14 +42,18 @@ namespace {
 bool s_label_metrics_ready = false;
 bool s_cardinal_use_vlw = false;
 bool s_scale_use_vlw = false;
+bool s_info_use_vlw = false;
 float s_cardinal_vlw_size = 0.56f;
 float s_scale_vlw_size = 0.50f;
 float s_tag_vlw_size = 0.56f;
-const lgfx::GFXfont* s_cardinal_gfx = &fonts::FreeSansBold12pt7b;
-const lgfx::GFXfont* s_scale_gfx = &fonts::FreeSansBold9pt7b;
-const lgfx::GFXfont* s_tag_gfx = &fonts::FreeSansBold12pt7b;
+float s_info_vlw_size = 0.34f;
+const lgfx::GFXfont* s_cardinal_gfx = &lgfx_fonts::FreeSansBold12pt7b;
+const lgfx::GFXfont* s_scale_gfx = &lgfx_fonts::FreeSansBold9pt7b;
+const lgfx::GFXfont* s_tag_gfx = &lgfx_fonts::FreeSansBold12pt7b;
+const lgfx::GFXfont* s_info_gfx = &lgfx_fonts::FreeSansBold9pt7b;
 
 bool s_tag_label_metrics_ready = false;
+bool s_info_metrics_ready = false;
 bool s_tag_use_vlw = false;
 
 int s_scale_label_max_w = 0;
@@ -54,6 +62,7 @@ int s_scale_label_h = 0;
 lgfx::LovyanGFX* s_draw = &tft;
 LGFX_Sprite s_frame(&tft);
 bool s_frame_ready = false;
+unsigned long s_last_adsb_update_ms = 0;
 
 class DrawScope {
  public:
@@ -123,16 +132,16 @@ void initLabelMetrics() {
     s_scale_use_vlw = true;
     s_scale_vlw_size = findVlwSizeForHeight(scale_target);
   } else {
-    const lgfx::GFXfont* cardinal_candidates[] = {&fonts::FreeSansBold12pt7b,
-                                                  &fonts::FreeSansBold9pt7b};
+    const lgfx::GFXfont* cardinal_candidates[] = {&lgfx_fonts::FreeSansBold12pt7b,
+                                                  &lgfx_fonts::FreeSansBold9pt7b};
     s_cardinal_gfx =
         pickGfxFontClosest(cardinal_target, cardinal_candidates, 2);
     s_cardinal_use_vlw = false;
 
     const int cardinal_h = measureGfxHeight(*s_cardinal_gfx);
     const int scale_target = cardinal_h - radar::kScaleBelowCardinalPx;
-    const lgfx::GFXfont* scale_candidates[] = {&fonts::FreeSansBold9pt7b,
-                                               &fonts::FreeSansBold12pt7b};
+    const lgfx::GFXfont* scale_candidates[] = {&lgfx_fonts::FreeSansBold9pt7b,
+                                               &lgfx_fonts::FreeSansBold12pt7b};
     s_scale_gfx = pickGfxFontClosest(scale_target, scale_candidates, 2);
     s_scale_use_vlw = false;
   }
@@ -165,8 +174,8 @@ void initTagLabelMetrics() {
     s_tag_use_vlw = true;
     s_tag_vlw_size = findVlwSizeForHeight(target);
   } else {
-    const lgfx::GFXfont* tag_candidates[] = {&fonts::FreeSansBold12pt7b,
-                                               &fonts::FreeSansBold9pt7b};
+    const lgfx::GFXfont* tag_candidates[] = {&lgfx_fonts::FreeSansBold12pt7b,
+                                               &lgfx_fonts::FreeSansBold9pt7b};
     s_tag_gfx = pickGfxFontClosest(target, tag_candidates, 2);
     s_tag_use_vlw = false;
   }
@@ -543,6 +552,193 @@ void drawAircraft() {
   }
 }
 
+void initInfoMetrics() {
+  if (s_info_metrics_ready) {
+    return;
+  }
+
+  if (displayFontIsSmooth()) {
+    s_info_use_vlw = true;
+    s_info_vlw_size = findVlwSizeForHeight(13);
+  } else {
+    const lgfx::GFXfont* info_candidates[] = {&lgfx_fonts::FreeSansBold9pt7b,
+                                              &lgfx_fonts::FreeSansBold12pt7b};
+    s_info_gfx = pickGfxFontClosest(13, info_candidates, 2);
+    s_info_use_vlw = false;
+  }
+
+  s_info_metrics_ready = true;
+}
+
+void applyInfoStyle() {
+  if (s_info_use_vlw) {
+    displayFontSetSmoothSize(*s_draw, s_info_vlw_size);
+  } else {
+    displayFontSetBitmap(*s_draw, s_info_gfx);
+  }
+}
+
+const char* bearingLabel(float dx_km, float dy_km) {
+  constexpr const char* kLabels[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+  float deg = atan2f(dx_km, dy_km) * 57.2957795f;
+  if (deg < 0.0f) {
+    deg += 360.0f;
+  }
+  const int sector = static_cast<int>(floorf((deg + 22.5f) / 45.0f)) % 8;
+  return kLabels[sector];
+}
+
+struct NearestAircraftInfo {
+  const services::adsb::Aircraft* aircraft = nullptr;
+  float km = 0.0f;
+  const char* bearing = "";
+};
+
+size_t findNearestAircraft(NearestAircraftInfo* nearest, size_t max_count) {
+  const size_t count = services::adsb::aircraftCount();
+  const services::adsb::Aircraft* planes = services::adsb::aircraftList();
+  size_t found = 0;
+
+  for (size_t i = 0; i < count; ++i) {
+    float dx_km = 0.0f;
+    float dy_km = 0.0f;
+    float dist_km = 0.0f;
+    offsetKmFromCenter(planes[i].lat, planes[i].lon, &dx_km, &dy_km, &dist_km);
+
+    if (found == max_count && dist_km >= nearest[found - 1].km) {
+      continue;
+    }
+
+    const size_t limit = (found < max_count) ? found : max_count - 1;
+    size_t insert_at = limit;
+    while (insert_at > 0 && dist_km < nearest[insert_at - 1].km) {
+      nearest[insert_at] = nearest[insert_at - 1];
+      --insert_at;
+    }
+
+    nearest[insert_at].aircraft = &planes[i];
+    nearest[insert_at].km = dist_km;
+    nearest[insert_at].bearing = bearingLabel(dx_km, dy_km);
+    if (found < max_count) {
+      ++found;
+    }
+  }
+
+  return found;
+}
+
+void formatDistance(char* out, size_t out_len, float km) {
+  if (radar::useMiles()) {
+    snprintf(out, out_len, "%.1fmi", km / 1.609344f);
+    return;
+  }
+  snprintf(out, out_len, "%.1fkm", km);
+}
+
+void drawInfoPanel() {
+  if (!config::kRadarInfoPanelEnabled) {
+    return;
+  }
+
+  initInfoMetrics();
+  applyInfoStyle();
+
+  constexpr int card_w = 280;
+  constexpr int card_h = 126;
+  const int card_x = (config::kDisplayWidth - card_w) / 2;
+  const int card_y = config::kRadarInfoPanelY;
+  constexpr int pad_x = 12;
+  constexpr int pad_y = 9;
+  constexpr int label_gap = 14;
+  const int line_h = s_draw->fontHeight() + 4;
+  const int aircraft_line_h = line_h + 2;
+
+  s_draw->fillRoundRect(card_x, card_y, card_w, card_h, 8,
+                        radar::kColorBackground);
+  s_draw->drawRoundRect(card_x, card_y, card_w, card_h, 8,
+                        radar::kColorGrid);
+
+  char range_label[12];
+  radar::formatCurrentRing3Label(range_label, sizeof(range_label));
+
+  char updated_label[16];
+  if (s_last_adsb_update_ms == 0) {
+    snprintf(updated_label, sizeof(updated_label), "--");
+  } else {
+    unsigned long age_s = (millis() - s_last_adsb_update_ms) / 1000UL;
+    if (age_s == 0) {
+      age_s = 1;
+    }
+    snprintf(updated_label, sizeof(updated_label), "%lus", age_s);
+  }
+
+  const int col_w = (card_w - pad_x * 2) / 3;
+  const int col_y = card_y + pad_y;
+  const int value_y = col_y + label_gap;
+  const int col0 = card_x + pad_x + col_w / 2;
+  const int col1 = col0 + col_w;
+  const int col2 = col1 + col_w;
+
+  s_draw->setTextDatum(textdatum_t::top_center);
+  s_draw->setTextColor(radar::kColorGrid, radar::kColorBackground);
+  s_draw->drawString("RANGE", col0, col_y);
+  s_draw->drawString("ACFT", col1, col_y);
+  s_draw->drawString("AGE", col2, col_y);
+
+  s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
+  s_draw->drawString(range_label, col0, value_y);
+  char aircraft_label[8];
+  snprintf(aircraft_label, sizeof(aircraft_label), "%u",
+           static_cast<unsigned>(services::adsb::aircraftCount()));
+  s_draw->setTextColor(radar::kColorAircraft, radar::kColorBackground);
+  s_draw->drawString(aircraft_label, col1, value_y);
+  s_draw->setTextColor(radar::kColorInfoMuted, radar::kColorBackground);
+  s_draw->drawString(updated_label, col2, value_y);
+
+  const int text_x = card_x + pad_x;
+  int y = card_y + 50;
+  char line[96];
+  s_draw->setTextDatum(textdatum_t::top_left);
+  s_draw->setTextColor(radar::kColorGrid, radar::kColorBackground);
+  s_draw->drawString("NEAREST", text_x, y);
+
+  y += line_h;
+  NearestAircraftInfo nearest[3];
+  const size_t nearest_count = findNearestAircraft(nearest, 3);
+  if (nearest_count == 0) {
+    s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
+    s_draw->drawString("none", text_x, y);
+    return;
+  }
+
+  for (size_t i = 0; i < nearest_count; ++i) {
+    const services::adsb::Aircraft* aircraft = nearest[i].aircraft;
+    char dist_label[16];
+    formatDistance(dist_label, sizeof(dist_label), nearest[i].km);
+    const char* ident = aircraft->callsign[0] != '\0' ? aircraft->callsign : "unknown";
+    const char* type = aircraft->type[0] != '\0' ? aircraft->type : "--";
+    const char* alt = aircraft->alt[0] != '\0' ? aircraft->alt : "--";
+    int cursor_x = text_x;
+
+    s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
+    s_draw->drawString(ident, cursor_x, y);
+    cursor_x += s_draw->textWidth(ident) + 8;
+
+    s_draw->setTextColor(radar::kColorTagType, radar::kColorBackground);
+    s_draw->drawString(type, cursor_x, y);
+    cursor_x += s_draw->textWidth(type) + 8;
+
+    snprintf(line, sizeof(line), "%s %s", dist_label, nearest[i].bearing);
+    s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
+    s_draw->drawString(line, cursor_x, y);
+    cursor_x += s_draw->textWidth(line) + 8;
+
+    s_draw->setTextColor(radar::kColorTagAltitude, radar::kColorBackground);
+    s_draw->drawString(alt, cursor_x, y);
+    y += aircraft_line_h;
+  }
+}
+
 void applyCardinalStyle() {
   if (s_cardinal_use_vlw) {
     displayFontSetSmoothSize(*s_draw, s_cardinal_vlw_size);
@@ -677,6 +873,7 @@ void renderFrame() {
   {
     const DrawScope scope(s_frame);
     drawAircraft();
+    drawInfoPanel();
   }
   s_frame.pushSprite(0, 0);
   tft.setTextDatum(textdatum_t::top_left);
@@ -698,11 +895,13 @@ void radarDisplayDraw() {
   const DrawScope scope(tft);
   drawStaticGrid(tft);
   drawAircraft();
+  drawInfoPanel();
   tft.setTextDatum(textdatum_t::top_left);
 }
 
 void radarDisplayRefreshAircraft() {
   initPalette();
+  s_last_adsb_update_ms = millis();
 
   if (ensureFrameSprite()) {
     renderFrame();
@@ -710,6 +909,25 @@ void radarDisplayRefreshAircraft() {
   }
 
   radarDisplayDraw();
+}
+
+void radarDisplayRefreshInfo() {
+  if (!config::kRadarInfoPanelEnabled) {
+    return;
+  }
+
+  initPalette();
+  if (ensureFrameSprite()) {
+    const DrawScope scope(s_frame);
+    drawInfoPanel();
+    s_frame.pushSprite(0, 0);
+    tft.setTextDatum(textdatum_t::top_left);
+    return;
+  }
+
+  const DrawScope scope(tft);
+  drawInfoPanel();
+  tft.setTextDatum(textdatum_t::top_left);
 }
 
 }  // namespace ui
