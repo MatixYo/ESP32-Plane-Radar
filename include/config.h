@@ -57,7 +57,11 @@ constexpr int kDisplayHeight = kBoardOnx2432g028 ? 320 : 240;
 
 constexpr int kRadarViewportSize = kDisplayWidth < 240 ? kDisplayWidth : 240;
 constexpr int kRadarViewportX = (kDisplayWidth - kRadarViewportSize) / 2;
-constexpr int kRadarViewportY = (kDisplayHeight - kRadarViewportSize) / 2;
+constexpr int kRadarViewportY = kBoardOnx2432g028
+                                  ? 0
+                                  : (kDisplayHeight - kRadarViewportSize) / 2;
+constexpr bool kRadarInfoPanelEnabled = kBoardOnx2432g028;
+constexpr int kRadarInfoPanelY = 246;
 
 constexpr uint32_t kDisplaySpiWriteHz =
     kBoardOnx2432g028 ? 40000000 : 40000000;

@@ -20,6 +20,7 @@ bool g_radar_visible = false;
 unsigned long g_wifi_down_since = 0;
 unsigned long g_last_reconnect_ms = 0;
 unsigned long g_last_adsb_fetch_ms = 0;
+unsigned long g_last_info_refresh_ms = 0;
 
 void showRadarIfConnected() {
   if (WiFi.status() != WL_CONNECTED) {
@@ -109,9 +110,17 @@ void loop() {
     g_wifi_down_since = 0;
     if (!g_radar_visible) {
       showRadarIfConnected();
-    } else if (millis() - g_last_adsb_fetch_ms >= config::kAdsbFetchIntervalMs) {
-      g_last_adsb_fetch_ms = millis();
-      fetchAndDrawAircraft();
+    } else {
+      const unsigned long now = millis();
+      if (now - g_last_adsb_fetch_ms >= config::kAdsbFetchIntervalMs) {
+        fetchAndDrawAircraft();
+        const unsigned long after_fetch_ms = millis();
+        g_last_adsb_fetch_ms = after_fetch_ms;
+        g_last_info_refresh_ms = after_fetch_ms;
+      } else if (now - g_last_info_refresh_ms >= 1000UL) {
+        g_last_info_refresh_ms = now;
+        ui::radarDisplayRefreshInfo();
+      }
     }
   }
 

@@ -8,4 +8,7 @@ void radarDisplayDraw();
 /** Redraw aircraft only (blits cached grid; no full-screen clear). */
 void radarDisplayRefreshAircraft();
 
+/** Refresh dynamic info panel without refetching ADS-B data. */
+void radarDisplayRefreshInfo();
+
 }  // namespace ui
