@@ -138,50 +138,69 @@ src/
   services/
 ```
 
-## Wiring (GC9A01 ↔ ESP32-C3 Super Mini)
+## Wiring
 
+### ESP32-C3 Super Mini
 | Display | ESP32-C3 |
 |---------|----------|
-| VCC | 3V3 |
-| GND | GND |
-| RST | GPIO **0** |
-| CS | GPIO **1** |
-| DC | GPIO **10** |
-| SDA (MOSI) | GPIO **3** |
-| SCL (SCLK) | GPIO **4** |
-| BOOT (user) | GPIO **9** |
+| **VCC** | 3V3 |
+| **GND** | GND |
+| **RST** | GPIO **0** |
+| **CS**  | GPIO **1** |
+| **DC**  | GPIO **10** |
+| **SDA** (MOSI) | GPIO **3** |
+| **SCL** (SCLK) | GPIO **4** |
+| **BOOT** (user) | GPIO **9** |
+
+### ESP32-S3 Super Mini (Sequential Pinout)
+| Display | ESP32-S3 |
+|---------|----------|
+| **VCC** | 3V3 |
+| **GND** | GND |
+| **SCL** (SCLK) | GPIO **1** |
+| **SDA** (MOSI) | GPIO **2** |
+| **DC**  | GPIO **3** |
+| **CS**  | GPIO **4** |
+| **RST** | GPIO **5** |
+| **BOOT** (user) | GPIO **0** (onboard Boot button) |
 
 ## Build
 
+To compile and upload for your specific hardware, choose the corresponding PlatformIO environment:
+
+### For ESP32-C3 Super Mini
 ```bash
-pio run -t upload
-pio device monitor
+# Upload to board
+pio run -t upload -e supermini
+# Open serial monitor
+pio device monitor -e supermini
 ```
 
-- PlatformIO env: **`supermini`**
-- Serial: **115200** baud
-- USB CDC on boot enabled in `platformio.ini` for the Super Mini
+### For ESP32-S3 Super Mini
+```bash
+# Upload to board
+pio run -t upload -e supermini-s3
+# Open serial monitor
+pio device monitor -e supermini-s3
+```
+
+- **Serial**: **115200** baud
+- **USB CDC on Boot**: Enabled by default in `platformio.ini` for both boards (enables logging over native USB-C).
 
 ### Web-flashable release image
 
-Single `.bin` for [esptool-js](https://espressif.github.io/esptool-js/) and similar tools (ESP32-C3, 4 MB, flash at **0x0**):
+Single `.bin` for [esptool-js](https://espressif.github.io/esptool-js/) and similar tools (4 MB, flash at **0x0**):
 
+For ESP32-C3:
 ```bash
-chmod +x scripts/merge-firmware.sh   # once
-./scripts/merge-firmware.sh
-```
-
-Writes `release/plane-radar-merged.bin`. Skip rebuild if firmware is already built:
-
-```bash
-./scripts/merge-firmware.sh --no-build
-```
-
-Or via PlatformIO only (output: `.pio/build/supermini/firmware-merged.bin`):
-
-```bash
-pio run -e supermini
 pio run -t merge -e supermini
+# Merged binary output: .pio/build/supermini/firmware-merged.bin
+```
+
+For ESP32-S3:
+```bash
+pio run -t merge -e supermini-s3
+# Merged binary output: .pio/build/supermini-s3/firmware-merged.bin
 ```
 
 Put the board in download mode (hold **BOOT**, tap **RESET**), then flash with Chrome/Edge over USB.
