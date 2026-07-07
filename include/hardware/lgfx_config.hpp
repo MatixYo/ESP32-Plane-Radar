@@ -9,6 +9,7 @@
 class LGFX : public lgfx::LGFX_Device {
   lgfx::Bus_SPI _bus;
   lgfx::Panel_GC9A01 _panel;
+  lgfx::Light_PWM _light;
 
 public:
   LGFX() {
@@ -30,6 +31,16 @@ public:
       cfg.invert = config::kDisplayInvert;
       cfg.rgb_order = config::kDisplayRgbOrder;
       _panel.config(cfg);
+    }
+    {
+      // Backlight (ESP32-2424S012: GPIO3). Without this the screen stays dark.
+      auto cfg = _light.config();
+      cfg.pin_bl = static_cast<int>(config::kDisplayPinBl);
+      cfg.invert = false;
+      cfg.freq = 12000;
+      cfg.pwm_channel = 1;
+      _light.config(cfg);
+      _panel.setLight(&_light);
     }
     setPanel(&_panel);
   }

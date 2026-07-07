@@ -23,18 +23,20 @@ constexpr unsigned long kWifiDownGraceMs = 4000;
 /** Minimum interval between background reconnect tries. */
 constexpr unsigned long kWifiReconnectIntervalMs = 15000;
 
-// --- BOOT button (ESP32-C3 Super Mini, active LOW) ---
+// --- BOOT button (active LOW; GPIO9 on ESP32-2424S012 too) ---
 constexpr gpio_num_t kBootPin = GPIO_NUM_9;
 constexpr unsigned long kBootResetHoldMs = 3000UL;
 /** Ignore BOOT taps shorter than this (debounce). */
 constexpr unsigned long kBootTapMinMs = 40UL;
 
 // --- Display: GC9A01 1.28" round 240×240 (SPI) ---
-constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_0;
-constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_1;
-constexpr gpio_num_t kDisplayPinDc = GPIO_NUM_10;
-constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_3;  // display SDA
-constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_4;  // display SCL
+// Pin map: ESP32-2424S012 integrated board (ESP32-C3 + GC9A01)
+constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_NC;  // no reset line (-1)
+constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_10;
+constexpr gpio_num_t kDisplayPinDc = GPIO_NUM_2;
+constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_7;  // display SDA
+constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_6;  // display SCL
+constexpr gpio_num_t kDisplayPinBl = GPIO_NUM_3;    // backlight — must be driven HIGH
 
 constexpr int kDisplayWidth = 240;
 constexpr int kDisplayHeight = 240;
