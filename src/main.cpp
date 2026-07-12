@@ -3,6 +3,7 @@
 
 #include "config.h"
 #include "services/wifi_setup.h"
+#include "services/radar_location.h"
 #include "services/satellite_tracker.h"
 #include "ui/radar_display.h"
 #include "ui/status_screens.h"
