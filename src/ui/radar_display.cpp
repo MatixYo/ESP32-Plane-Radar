@@ -13,8 +13,6 @@
 #include "services/satellite_tracker.h"
 #include "ui/radar_theme.h"
 
-namespace fonts = lgfx::v1::fonts;
-
 namespace ui {
 namespace radar {
 
@@ -291,47 +289,6 @@ void drawCardinalLabel(const char* text, int x, int y, textdatum_t datum) {
   s_draw->setTextDatum(datum);
   s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
   s_draw->drawString(text, x, y);
-}
-
-void drawGridRing(int cx, int cy, int r, uint16_t color) {
-  if (r <= 0) {
-    return;
-  }
-  const int thickness =
-      std::max(1, static_cast<int>(radar::kGridStrokeHalfWidth * 2.0f));
-  for (int i = 0; i < thickness && r - i > 0; ++i) {
-    s_draw->drawCircle(cx, cy, r - i, color);
-  }
-}
-
-void drawRings(int cx, int cy, int outer_radius) {
-  for (int i = 1; i <= radar::kRingCount; ++i) {
-    const int r = (outer_radius * i) / radar::kRingCount;
-    drawGridRing(cx, cy, r, radar::kColorGrid);
-  }
-}
-
-void drawCrosshairs(int cx, int cy, int radius, uint16_t color) {
-  s_draw->drawWideLine(cx, cy - radius, cx, cy + radius,
-                       radar::kGridStrokeHalfWidth, color);
-  s_draw->drawWideLine(cx - radius, cy, cx + radius, cy,
-                       radar::kGridStrokeHalfWidth, color);
-}
-
-void drawCenterDot(int cx, int cy) {
-  s_draw->fillSmoothCircle(cx, cy, radar::kCenterDotRadius, radar::kColorCenter);
-}
-
-void drawCardinalLabels() {
-  const int cx = radar::kCenterX;
-  const int cy = radar::kCenterY;
-  const int edge = radar::kSize - 1;
-
-  drawCardinalLabel("N", cx, radar::kCardinalNorthOffsetY, textdatum_t::top_center);
-  drawCardinalLabel("S", cx, edge + radar::kCardinalSouthOffsetY,
-                    textdatum_t::bottom_center);
-  drawCardinalLabel("W", 0, cy, textdatum_t::middle_left);
-  drawCardinalLabel("E", edge, cy, textdatum_t::middle_right);
 }
 
 template <typename Gfx>
