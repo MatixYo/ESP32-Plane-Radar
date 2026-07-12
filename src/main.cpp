@@ -1,3 +1,13 @@
+#include <Arduino.h>
+#include <WiFi.h>
+
+#include "config.h"
+#include "services/wifi_setup.h"
+#include "services/satellite_tracker.h"
+#include "ui/radar_display.h"
+#include "ui/status_screens.h"
+#include "hardware/display.h"
+
 namespace {
 
 bool g_radar_visible = false;
