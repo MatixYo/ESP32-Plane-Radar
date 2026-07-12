@@ -1,0 +1,28 @@
+  - name: Setup Python
+    uses: actions/setup-python@v4
+    with:
+      python-version: '3.11'
+
+  - name: Restore PlatformIO cache
+    uses: actions/cache@v4
+    with:
+      path: |
+        ~/.platformio
+        .piolibdeps
+        .pio
+        .cache
+      key: ${{ runner.os }}-platformio-${{ hashFiles('**/platformio.ini') }}
+      restore-keys: |
+        ${{ runner.os }}-platformio-
+
+  - name: Install PlatformIO
+    run: python -m pip install -U platformio
+
+  - name: Build environment: supermini
+    run: pio run -e supermini
+
+  - name: Upload firmware artifact
+    uses: actions/upload-artifact@v4
+    with:
+      name: firmware-supermini
+      path: .pio/build/supermini/*.{bin,elf,hex}
