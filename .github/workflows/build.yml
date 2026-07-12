@@ -1,32 +1,40 @@
-steps:
-  - name: Setup Python
-    uses: actions/setup-python@v4
-    with:
-      python-version: "3.11"
+name: PlatformIO CI
 
-  - name: Restore PlatformIO cache
-    uses: actions/cache@v4
-    with:
-      path: |
-        ~/.platformio
-        .piolibdeps
-        .pio
-        .cache
-      key: ${{ runner.os }}-platformio-${{ hashFiles('**/platformio.ini') }}
-      restore-keys: |
-        ${{ runner.os }}-platformio-
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
 
-  - name: Install PlatformIO
-    run: python -m pip install -U platformio
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-  - name: Build environment: supermini
-    run: pio run -e supermini
+    steps:
+      - uses: actions/checkout@v4
 
-  - name: Upload firmware artifact
-    uses: actions/upload-artifact@v4
-    with:
-      name: firmware-supermini
-      path: |
-        .pio/build/supermini/*.bin
-        .pio/build/supermini/*.elf
-        .pio/build/supermini/*.hex
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Restore PlatformIO cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .pio
+          key: ${{ runner.os }}-platformio-${{ hashFiles('**/platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-platformio-
+
+      - name: Install PlatformIO
+        run: pip install -U platformio
+
+      - name: Build environment
+        run: pio run -e supermini
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-supermini
+          path: .pio/build/supermini/
