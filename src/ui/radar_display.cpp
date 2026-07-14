@@ -15,8 +15,6 @@
 #include "ui/radar_theme.h"
 #include "ui/runway_overlay.h"
 
-namespace fonts = lgfx::v1::fonts;
-
 namespace ui {
 namespace radar {
 
@@ -41,9 +39,9 @@ bool s_scale_use_vlw = false;
 float s_cardinal_vlw_size = 0.56f;
 float s_scale_vlw_size = 0.50f;
 float s_tag_vlw_size = 0.56f;
-const lgfx::GFXfont* s_cardinal_gfx = &fonts::FreeSansBold12pt7b;
+const lgfx::GFXfont* s_cardinal_gfx = &fonts::FreeSansBold9pt7b;
 const lgfx::GFXfont* s_scale_gfx = &fonts::FreeSansBold9pt7b;
-const lgfx::GFXfont* s_tag_gfx = &fonts::FreeSansBold12pt7b;
+const lgfx::GFXfont* s_tag_gfx = &fonts::FreeSansBold9pt7b;
 
 bool s_tag_label_metrics_ready = false;
 bool s_tag_use_vlw = false;
