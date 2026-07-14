@@ -24,7 +24,11 @@ volatile bool s_boot_is_down = false;
 volatile unsigned long s_boot_down_ms = 0;
 bool s_long_press_handled = false;
 bool s_boot_interrupt_attached = false;
+unsigned long s_portal_last_activity_ms = 0;
 
+void touchPortalActivity() {
+  s_portal_last_activity_ms = millis();
+}
 void IRAM_ATTR onBootButtonIsr() {
   const bool down = digitalRead(config::kBootPin) == LOW;
   const unsigned long now = millis();
@@ -100,6 +104,9 @@ void refreshPortalParamDefaults() {
 }
 
 void onPortalParamsSaved() {
+  // Keep portal alive
+  touchPortalActivity();
+
   if (!services::location::saveFromStrings(s_param_lat.getValue(),
                                            s_param_lon.getValue())) {
     Serial.println("Invalid lat/lon in portal — keeping previous location");
@@ -243,6 +250,7 @@ void startLanWebPortal() {
   }
 #endif
   s_wm.startWebPortal();
+  touchPortalActivity();
   Serial.printf("LAN config: http://%s.local or http://%s\n",
                 config::kPortalHostname, WiFi.localIP().toString().c_str());
 }
@@ -418,12 +426,17 @@ bool wifiReconnect() {
 void wifiLoop() {
   ensureWifiManager();
   if (wifiLinkUp()) {
-    if (!s_wm.getWebPortalActive() && !s_wm.getConfigPortalActive()) {
-      startLanWebPortal();
-    }
+    startLanWebPortal();
+
     if (s_wm.getWebPortalActive() || s_wm.getConfigPortalActive()) {
       bootButtonPollLongPress();
       s_wm.process();
+
+      if (s_wm.getWebPortalActive() &&
+          millis() - s_portal_last_activity_ms >= config::kPortalIdleTimeoutMs) {
+        Serial.println("LAN portal idle timeout - stopping");
+        stopLanWebPortal();
+      }
     }
   } else {
     stopLanWebPortal();

@@ -11,8 +11,6 @@
 #include "ui/radar_range.h"
 #include "ui/radar_theme.h"
 
-namespace fonts = lgfx::v1::fonts;
-
 namespace ui::runway {
 namespace {
 

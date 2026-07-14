@@ -17,6 +17,8 @@ constexpr char kPortalHostUrl[] = "plane-radar.local";
 constexpr unsigned long kWifiConnectAttemptMs = 15000;
 constexpr uint8_t kWifiConnectAttempts = 3;
 constexpr unsigned long kWifiPortalTimeoutSec = 0;  // 0 = no timeout while configuring
+constexpr unsigned long kPortalIdleTimeoutMs = 300000;  // Unload config portal after 5 minutes of inactivity
+                                                        // to minimise memory footprint
 constexpr unsigned long kWifiConnectingFrameMs = 50;
 /** Wait after disconnect before reconnecting (avoids portal on brief drops). */
 constexpr unsigned long kWifiDownGraceMs = 4000;

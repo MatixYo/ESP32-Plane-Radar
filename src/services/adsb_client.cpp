@@ -21,12 +21,62 @@ constexpr unsigned long kRequestTimeoutMs = 10000;
 Aircraft s_aircraft[kMaxAircraft];
 size_t s_aircraft_count = 0;
 PollFn s_poll_fn = nullptr;
+WiFiClientSecure s_client;
+HTTPClient s_http;
+bool s_tls_configured = false;
 
 void pollNetwork() {
   if (s_poll_fn != nullptr) {
     s_poll_fn();
   }
 }
+
+class PollingStream : public Stream {
+ public:
+  explicit PollingStream(Stream& inner) : inner_(inner) {}
+
+  int available() override {
+    return (buf_pos_ < buf_len_) ? (buf_len_ - buf_pos_) : refill();
+  }
+
+  int read() override {
+    if (buf_pos_ >= buf_len_ && refill() <= 0) return -1;
+    return buf_[buf_pos_++];
+  }
+
+  int peek() override {
+    if (buf_pos_ >= buf_len_ && refill() <= 0) return -1;
+    return buf_[buf_pos_];
+  }
+
+  size_t readBytes(uint8_t* out, size_t len) override {
+    size_t total = 0;
+    while (total < len) {
+      if (buf_pos_ >= buf_len_ && refill() <= 0) break;
+      size_t avail = buf_len_ - buf_pos_;
+      size_t take = avail < (len - total) ? avail : (len - total);
+      memcpy(out + total, buf_ + buf_pos_, take);
+      buf_pos_ += take;
+      total += take;
+    }
+    return total;
+  }
+
+  size_t write(uint8_t) override { return 0; }
+
+ private:
+  int refill() {
+    pollNetwork();  // call per chunk
+    buf_len_ = inner_.readBytes(buf_, sizeof(buf_));
+    buf_pos_ = 0;
+    return buf_len_;
+  }
+
+  Stream& inner_;
+  uint8_t buf_[256];
+  size_t buf_pos_ = 0;
+  size_t buf_len_ = 0;
+};
 
 int performGetWithPoll(HTTPClient& http) {
   http.setConnectTimeout(kConnectAttemptMs);
@@ -205,6 +255,37 @@ size_t aircraftCount() { return s_aircraft_count; }
 
 const Aircraft* aircraftList() { return s_aircraft; }
 
+void ensureClientConfigured() {
+  if (s_tls_configured) return;
+
+  s_client.setInsecure();
+  s_tls_configured = true;
+}
+
+JsonDocument& filterDoc() {
+  static JsonDocument filter;
+  static bool initialized = false;
+  if (!initialized) {
+    JsonObject filter_ac = filter["ac"].add<JsonObject>();
+    filter_ac["hex"] = true;
+    filter_ac["flight"] = true;
+    filter_ac["t"] = true;
+    filter_ac["lat"] = true;
+    filter_ac["lon"] = true;
+    filter_ac["alt_baro"] = true;
+    filter_ac["alt_geom"] = true;
+    filter_ac["gs"] = true;
+    filter_ac["tas"] = true;
+    filter_ac["ias"] = true;
+    filter_ac["track"] = true;
+    filter_ac["true_heading"] = true;
+    filter_ac["mag_heading"] = true;
+    filter_ac["dir"] = true;
+    initialized = true;
+  }
+  return filter;
+}
+
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   const float dist_nm = kmToNauticalMiles(fetch_radius_km);
 
@@ -215,33 +296,28 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   url += "/dist/";
   url += String(dist_nm, 1);
 
-  WiFiClientSecure client;
-  client.setInsecure();
+  ensureClientConfigured();
 
-  HTTPClient http;
-  if (!http.begin(client, url)) {
+  if (!s_http.begin(s_client, url)) {
     Serial.println("adsb: http.begin failed");
     return false;
   }
 
-  http.setTimeout(kRequestTimeoutMs);
-  const int code = performGetWithPoll(http);
+  s_http.setTimeout(kRequestTimeoutMs);
+
+  const int code = performGetWithPoll(s_http);
   if (code != HTTP_CODE_OK) {
     Serial.printf("adsb: HTTP %d\n", code);
-    http.end();
+    s_http.end();
     return false;
   }
 
-  String payload;
-  if (!readResponseBodyWithPoll(http, payload)) {
-    Serial.println("adsb: empty response");
-    http.end();
-    return false;
-  }
-  http.end();
-
+  PollingStream polling_stream(*s_http.getStreamPtr());
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, payload);
+  const DeserializationError err = deserializeJson(
+    doc, polling_stream, DeserializationOption::Filter(filterDoc()));
+  s_http.end();
+
   if (err) {
     Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
     return false;
