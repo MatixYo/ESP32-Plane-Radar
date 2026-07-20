@@ -162,29 +162,68 @@ pio device monitor
 - Serial: **115200** baud
 - USB CDC on boot enabled in `platformio.ini` for the Super Mini
 
-### Web-flashable release image
+## Flashing a Release
 
-Single `.bin` for [esptool-js](https://espressif.github.io/esptool-js/) and similar tools (ESP32-C3, 4 MB, flash at **0x0**):
+Download the latest `.bin` from the project's **Releases** page.
+
+Flash it with the Espressif Web Flasher (or any compatible ESP32 flashing tool) using these settings:
+
+| Setting | Value |
+|---------|-------|
+| Firmware | `plane-radar-vX.Y.Z.bin` |
+| Flash address | **`0x0`** |
+| Flash mode | Keep |
+| Flash frequency | Keep |
+| Flash size | Keep |
+
+> **Important**
+>
+> The release firmware is a **merged image** containing the bootloader, partition table, and application. It **must** be flashed at address **`0x0`**.
+
+Most ESP32-C3 boards automatically enter download mode when flashing. If your board does not, refer to your board's documentation for manually entering download mode.
+
+---
+
+## Building a Merged Firmware Image
+
+If you're building the firmware yourself, generate a merged image suitable for the web flasher with:
 
 ```bash
 chmod +x scripts/merge-firmware.sh   # once
 ./scripts/merge-firmware.sh
 ```
 
-Writes `release/plane-radar-merged.bin`. Skip rebuild if firmware is already built:
+The merged firmware will be written to:
+
+```
+release/plane-radar-merged.bin
+```
+
+To skip rebuilding and merge an existing firmware image:
 
 ```bash
 ./scripts/merge-firmware.sh --no-build
 ```
 
-Or via PlatformIO only (output: `.pio/build/supermini/firmware-merged.bin`):
+Alternatively, generate the merged image directly with PlatformIO:
 
 ```bash
 pio run -e supermini
 pio run -t merge -e supermini
 ```
 
-Put the board in download mode (hold **BOOT**, tap **RESET**), then flash with Chrome/Edge over USB.
+The merged firmware will be written to:
+
+```
+.pio/build/supermini/firmware-merged.bin
+```
+
+The generated merged image is flashed exactly like the release image:
+
+- Flash address: **`0x0`**
+- Flash mode: Keep
+- Flash frequency: Keep
+- Flash size: Keep
 
 ### CI and releases (GitHub Actions)
 
