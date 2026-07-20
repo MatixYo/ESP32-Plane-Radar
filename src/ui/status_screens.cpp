@@ -11,7 +11,6 @@
 #include "hardware/display.h"
 #include "hardware/display_font.h"
 
-namespace fonts = lgfx::v1::fonts;
 
 namespace {
 
@@ -241,3 +240,4 @@ void statusScreenWifiReset() {
   drawTextBlock(config::kColorYellow, config::kTextOnYellow, lines,
                 sizeof(lines) / sizeof(lines[0]));
 }
+
