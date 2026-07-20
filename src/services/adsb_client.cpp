@@ -13,9 +13,7 @@ namespace services::adsb {
 
 namespace {
 
-// Changed from opendata.adsb.fi (broken) to adsb.one public API
-// URL format: https://api.adsb.one/v2/point/{lat}/{lon}/{radius_nm}
-constexpr char kApiBase[] = "https://api.adsb.one/v2/point/";
+constexpr char kApiBase[] = "https://opendata.adsb.fi/api/v3/lat/";
 constexpr float kKmPerNm = 1.852f;
 constexpr int kConnectAttemptMs = 200;
 constexpr unsigned long kRequestTimeoutMs = 10000;
@@ -210,12 +208,11 @@ const Aircraft* aircraftList() { return s_aircraft; }
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   const float dist_nm = kmToNauticalMiles(fetch_radius_km);
 
-  // adsb.one URL format: /v2/point/{lat}/{lon}/{radius_nm}
   String url = kApiBase;
   url += String(center_lat, 6);
-  url += "/";
+  url += "/lon/";
   url += String(center_lon, 6);
-  url += "/";
+  url += "/dist/";
   url += String(dist_nm, 1);
 
   WiFiClientSecure client;
@@ -250,7 +247,6 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     return false;
   }
 
-  // adsb.one returns aircraft array under "ac" key (same as adsb.fi)
   JsonArray ac = doc["ac"].as<JsonArray>();
   if (ac.isNull()) {
     s_aircraft_count = 0;
