@@ -8,11 +8,12 @@ namespace ui::radar {
 /**
  * Range presets (label on ring 3 = ¾ of outer radius).
  *
- * Recommended for ADS-B on a 1.28″ display:
+ * Recommended for ADS-B on a 1.28" display:
  *   5 km  — pattern / very local (airfield vicinity)
  *  10 km  — default; neighborhood spotting
  *  15 km  — wider local area
  *  25 km  — metro / regional picture
+ *  50 km  — wide area / regional coverage
  *
  * Outer radius (for aircraft math) is ring-3 distance ÷ 0.75.
  */
@@ -29,6 +30,7 @@ constexpr RangePreset kRangePresets[] = {
     {10.0f, 10.0f * kRing3ToOuterKm},
     {15.0f, 15.0f * kRing3ToOuterKm},
     {25.0f, 25.0f * kRing3ToOuterKm},
+    {50.0f, 50.0f * kRing3ToOuterKm},  // Added 50 km wide-area preset
 };
 
 constexpr size_t kRangePresetCount =
