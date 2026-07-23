@@ -1,0 +1,34 @@
+---
+description: Radar display rendering, range math, and theme constants
+globs: "{src,include}/ui/**"
+alwaysApply: false
+---
+
+# Radar UI
+
+## Two draw paths
+
+| Function | When | Behavior |
+|----------|------|----------|
+| `radarDisplayDraw()` | First paint, range change | Full static grid (rings, cardinals, scale label) |
+| `radarDisplayRefreshAircraft()` | ADS-B update | Redraw aircraft on cached sprite — **no full-screen clear** |
+
+Rendering uses a sprite frame buffer (`LGFX_Sprite s_frame` in `radar_display.cpp`).
+
+## Range math
+
+- Ring 3 label = ¾ of outer radius: `outer_km = ring3_km × 4/3`
+- Presets in `kRangePresets[]`: 5, 10, 15, 25 km (default index 1 = 10 km)
+- ADS-B fetch radius: `fetchRadiusKm()` scales outer_km to screen edge so rim bearing dots have data
+
+## Aircraft display rules
+
+- **Inside outer ring**: red nose triangle, magenta speed vector, callsign/type/alt tags
+- **Beyond ring**: small red dot on screen rim at correct bearing (direction cue only)
+- **Tags**: placed toward center — west aircraft get tags on the right, east on the left
+
+## Constants belong in theme
+
+Layout, colors, stroke widths, label sizes → `include/ui/radar_theme.h`. Do not inline magic pixel values in draw code.
+
+RGB565 palette is initialized from theme byte targets (`kBgR`, `kGridG`, etc.) — avoid hardcoded color hex in draw functions.

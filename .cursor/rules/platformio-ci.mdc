@@ -1,0 +1,39 @@
+---
+description: PlatformIO build, merge firmware, and GitHub Actions CI
+globs: "{platformio.ini,scripts/**,.github/**}"
+alwaysApply: false
+---
+
+# Build and CI
+
+## PlatformIO
+
+- Env: **`supermini`** — ESP32-C3, Arduino framework, `-std=gnu++17`
+- Partitions: `partitions/plane_radar.csv` (4 MB, no OTA)
+- Embedded font: `data/ui_font.vlw` via `board_build.embed_files`
+- Build flags include `-DWM_MDNS` for `plane-radar.local` hostname
+
+## Commands
+
+```bash
+pio run -e supermini              # compile
+pio run -t upload -e supermini    # flash via USB
+pio run -t merge -e supermini     # merged web-flash image
+./scripts/merge-firmware.sh       # same merge → release/plane-radar-merged.bin
+```
+
+Merged image flashes at **0x0** (ESP32-C3, 4 MB). Download mode: hold BOOT, tap RESET.
+
+## Generated data
+
+- `scripts/build_large_airports.py` → `include/data/large_airports.h` + `src/data/large_airports_data.cpp`
+- Never hand-edit the generated `.cpp` blob
+
+## GitHub Actions
+
+| Workflow | Trigger | Output |
+|----------|---------|--------|
+| `build.yml` | push/PR to main | Artifact `plane-radar-supermini` (~90 days) |
+| `release.yml` | tag `v*` | Release asset `plane-radar-vX.Y.Z.bin` + `.sha256` |
+
+Release: `git tag v1.0.0 && git push origin v1.0.0`

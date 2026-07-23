@@ -1,0 +1,9 @@
+{
+  "platformio-ide.useDevelopmentPIOCore": true,
+  "terminal.integrated.env.osx": {
+    "PATH": "${workspaceFolder}/.venv/bin:${env:HOME}/.platformio/penv/bin:${env:PATH}"
+  },
+  "terminal.integrated.env.linux": {
+    "PATH": "${workspaceFolder}/.venv/bin:${env:HOME}/.platformio/penv/bin:${env:PATH}"
+  }
+}
