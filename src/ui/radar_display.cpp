@@ -201,8 +201,13 @@ constexpr float kKmPerDeg = 111.0f;
 
 void offsetKmFromCenter(float lat, float lon, float* dx_km, float* dy_km,
                         float* dist_km) {
-  *dx_km =
-      static_cast<float>(lon - services::location::lon()) * kKmPerDeg;
+  // A degree of longitude shrinks as cos(latitude); without this an east-west
+  // offset reads ~38% too far at 43°N, pushing aircraft outside the ring.
+  const float center_lat = static_cast<float>(services::location::lat());
+  const float lon_scale = cosf(center_lat * static_cast<float>(M_PI) / 180.0f);
+
+  *dx_km = static_cast<float>(lon - services::location::lon()) * kKmPerDeg *
+           lon_scale;
   *dy_km =
       static_cast<float>(lat - services::location::lat()) * kKmPerDeg;
   *dist_km = sqrtf((*dx_km) * (*dx_km) + (*dy_km) * (*dy_km));
