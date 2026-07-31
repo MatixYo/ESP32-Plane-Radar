@@ -15,8 +15,6 @@
 #include "ui/radar_theme.h"
 #include "ui/runway_overlay.h"
 
-namespace fonts = lgfx::v1::fonts;
-
 namespace ui {
 namespace radar {
 
