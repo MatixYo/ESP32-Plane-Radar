@@ -1,4 +1,4 @@
-# 4 MB flash — single large app (no OTA slot). Plane Radar + runway dataset.
+# 4 MB flash - single large app (no OTA slot). Plane Radar + runway dataset.
 # Name,   Type, SubType, Offset,  Size, Flags
 nvs,      data, nvs,     0x9000,  0x5000,
 otadata,  data, ota,     0xe000,  0x2000,

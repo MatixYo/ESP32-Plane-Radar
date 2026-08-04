@@ -15,6 +15,7 @@
 
 #include "config.h"
 #include "services/radar_location.h"
+#include "services/time_settings.h"
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
 
@@ -61,6 +62,8 @@ constexpr char kPrefsForcePortalKey[] = "portal";
 bool s_force_config_portal = false;
 WiFiManager s_wm;
 bool s_wm_configured = false;
+bool s_has_portal_log = false;
+unsigned long s_last_portal_log_ms = 0;
 
 void ensureWifiManager();
 void startLanWebPortal();
@@ -71,10 +74,49 @@ constexpr int kCoordParamLen = 20;
 constexpr char kCoordInputAttrs[] =
     " type=\"number\" step=\"0.000001\"";
 
+constexpr char kCitySelectorHtml[] = R"html(
+<label>City search</label><input class="city-search" type="search" placeholder="Type a city name">
+<label>City preset</label><select class="city-preset"><option value="">Manual coordinates</option>
+<option value="Amsterdam|52.367600|4.904100">Amsterdam, Netherlands</option>
+<option value="London|51.507400|-0.127800">London, United Kingdom</option>
+<option value="Paris|48.856600|2.352200">Paris, France</option>
+<option value="Berlin|52.520000|13.405000">Berlin, Germany</option>
+<option value="Madrid|40.416800|-3.703800">Madrid, Spain</option>
+<option value="Rome|41.902800|12.496400">Rome, Italy</option>
+<option value="New York|40.712800|-74.006000">New York, United States</option>
+<option value="Chicago|41.878100|-87.629800">Chicago, United States</option>
+<option value="Los Angeles|34.052200|-118.243700">Los Angeles, United States</option>
+<option value="Tokyo|35.676200|139.650300">Tokyo, Japan</option>
+<option value="Seoul|37.566500|126.978000">Seoul, South Korea</option>
+<option value="Singapore|1.352100|103.819800">Singapore</option>
+<option value="Sydney|-33.868800|151.209300">Sydney, Australia</option>
+<option value="Shanghai|31.230400|121.473700">Shanghai, China</option>
+<option value="Beijing|39.904200|116.407400">Beijing, China</option></select>
+<p>Offline presets fill latitude and longitude only. Search by city, then save; you can always enter coordinates manually below.</p>
+<script>(function(){const search=document.querySelector('.city-search');const select=document.querySelector('.city-preset');const options=Array.from(select.options);search.addEventListener('input',function(){const query=search.value.trim().toLowerCase();select.innerHTML='';options.forEach(function(option){if(!query||!option.value||option.text.toLowerCase().includes(query)){select.add(option.cloneNode(true));}});});select.addEventListener('change',function(){if(!select.value)return;const value=select.value.split('|');document.querySelector('[name=radar_lat]').value=Number(value[1]).toFixed(6);document.querySelector('[name=radar_lon]').value=Number(value[2]).toFixed(6);});})();</script>
+)html";
+
+constexpr char kTimeSettingsHintHtml[] = R"html(
+<p>Automatic timezone uses the default radar location. Enable manual timezone only when you need an override; enter a POSIX timezone such as CST-8 for China or EST5EDT,M3.2.0,M11.1.0 for US Eastern time.</p>
+<script>(function(){const manual=document.getElementById('manual_tz');const zone=document.getElementById('time_zone');function update(){zone.disabled=!manual.checked;}manual.addEventListener('change',update);update();})();</script>
+)html";
+
+WiFiManagerParameter s_param_city_selector(kCitySelectorHtml);
+
 WiFiManagerParameter s_param_lat("radar_lat", "Latitude (deg)", "0",
                                 kCoordParamLen, kCoordInputAttrs);
 WiFiManagerParameter s_param_lon("radar_lon", "Longitude (deg)", "0",
                                 kCoordParamLen, kCoordInputAttrs);
+
+char s_manual_timezone_attrs[32] = "type=\"checkbox\"";
+WiFiManagerParameter s_param_manual_timezone("manual_tz", "Use manual timezone", "T", 2,
+                                             s_manual_timezone_attrs, WFM_LABEL_AFTER);
+WiFiManagerParameter s_param_timezone("time_zone", "Manual POSIX timezone", "",
+                                      64, "placeholder=\"CST-8\"");
+WiFiManagerParameter s_param_time_settings_hint(kTimeSettingsHintHtml);
+char s_clock_24h_attrs[32] = "type=\"checkbox\" checked";
+WiFiManagerParameter s_param_clock_24h("clock_24h", "Use 24-hour time", "T", 2,
+                                        s_clock_24h_attrs, WFM_LABEL_AFTER);
 
 char s_miles_checkbox_attrs[32] = "type=\"checkbox\"";
 WiFiManagerParameter s_param_miles("use_miles", "Display distances in miles", "T", 2,
@@ -91,6 +133,17 @@ void refreshPortalParamDefaults() {
   snprintf(lon_buf, sizeof(lon_buf), "%.6f", services::location::lon());
   s_param_lat.setValue(lat_buf, kCoordParamLen);
   s_param_lon.setValue(lon_buf, kCoordParamLen);
+  snprintf(s_manual_timezone_attrs, sizeof(s_manual_timezone_attrs),
+           "type=\"checkbox\"%s",
+           services::time_settings::usesManualTimeZone() ? " checked" : "");
+  s_param_manual_timezone.setValue("T", 2);
+  s_param_timezone.setValue(services::time_settings::usesManualTimeZone()
+                                ? services::time_settings::timeZone()
+                                : "",
+                            64);
+  snprintf(s_clock_24h_attrs, sizeof(s_clock_24h_attrs), "type=\"checkbox\"%s",
+           services::time_settings::uses24HourClock() ? " checked" : "");
+  s_param_clock_24h.setValue("T", 2);
   snprintf(s_miles_checkbox_attrs, sizeof(s_miles_checkbox_attrs), "type=\"checkbox\"%s",
            ui::radar::useMiles() ? " checked" : "");
   s_param_miles.setValue("T", 2);
@@ -104,17 +157,36 @@ void onPortalParamsSaved() {
                                            s_param_lon.getValue())) {
     Serial.println("Invalid lat/lon in portal — keeping previous location");
   }
+  services::time_settings::saveFromPortal(s_param_manual_timezone.getValue(),
+                                          s_param_timezone.getValue(),
+                                          s_param_clock_24h.getValue());
   ui::radar::saveMilesFromPortal(s_param_miles.getValue());
   ui::radar::saveRunwaysFromPortal(s_param_runways.getValue());
 }
 
 void attachPortalParams(WiFiManager& wm) {
   refreshPortalParamDefaults();
+  wm.addParameter(&s_param_city_selector);
   wm.addParameter(&s_param_lat);
   wm.addParameter(&s_param_lon);
+  wm.addParameter(&s_param_manual_timezone);
+  wm.addParameter(&s_param_timezone);
+  wm.addParameter(&s_param_time_settings_hint);
+  wm.addParameter(&s_param_clock_24h);
   wm.addParameter(&s_param_miles);
   wm.addParameter(&s_param_runways);
   wm.setSaveParamsCallback(onPortalParamsSaved);
+}
+
+void logPortalLifecycle(const char* event) {
+  constexpr unsigned long kPortalLogMinIntervalMs = 1000UL;
+  const unsigned long now_ms = millis();
+  if (s_has_portal_log && now_ms - s_last_portal_log_ms < kPortalLogMinIntervalMs) {
+    return;
+  }
+  s_has_portal_log = true;
+  s_last_portal_log_ms = now_ms;
+  Serial.printf("Portal: %s\n", event);
 }
 
 void markForceConfigPortal() {
@@ -195,6 +267,7 @@ void resetWifiCredentials() {
 }
 
 void onConfigPortalApStarted(WiFiManager*) {
+  logPortalLifecycle("setup AP started");
   WiFi.setTxPower(WIFI_POWER_8_5dBm);
   statusScreenPortal();
 #ifdef WM_MDNS
@@ -243,6 +316,7 @@ void startLanWebPortal() {
   }
 #endif
   s_wm.startWebPortal();
+  logPortalLifecycle("LAN portal started");
   Serial.printf("LAN config: http://%s.local or http://%s\n",
                 config::kPortalHostname, WiFi.localIP().toString().c_str());
 }
@@ -251,6 +325,7 @@ void stopLanWebPortal() {
   if (!s_wm.getWebPortalActive()) {
     return;
   }
+  logPortalLifecycle("LAN portal stopped");
   s_wm.stopWebPortal();
 #ifdef WM_MDNS
   MDNS.end();
@@ -337,6 +412,7 @@ bool openConfigPortal() {
   statusScreenPortal();
   s_wm.setConfigPortalBlocking(false);
   s_wm.startConfigPortal(config::kPortalApName);
+  logPortalLifecycle("setup portal requested");
   while (s_wm.getConfigPortalActive()) {
     bootButtonPollLongPress();
     if (s_wm.process()) {
@@ -344,6 +420,7 @@ bool openConfigPortal() {
     }
     delay(10);
   }
+  logPortalLifecycle("setup portal stopped");
   return wifiLinkUp();
 }
 

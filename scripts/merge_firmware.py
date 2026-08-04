@@ -7,6 +7,10 @@ import os
 from os.path import join
 
 
+def bootloader_offset_for_mcu(mcu):
+    return "0x1000" if mcu in ("esp32", "esp32s2") else "0x0"
+
+
 def merge_firmware(source, target, env):
     build_dir = env.subst("$BUILD_DIR")
     progname = env.subst("${PROGNAME}")
@@ -15,6 +19,7 @@ def merge_firmware(source, target, env):
     boot_app0 = join(framework_dir, "tools", "partitions", "boot_app0.bin")
     merged = join(build_dir, "firmware-merged.bin")
     mcu = env.BoardConfig().get("build.mcu", "esp32c3")
+    bootloader_offset = bootloader_offset_for_mcu(mcu)
     flash_size = env.BoardConfig().get("upload.flash_size", "4MB")
 
     bootloader = join(build_dir, "bootloader.bin")
@@ -44,7 +49,7 @@ def merge_firmware(source, target, env):
         "80m",
         "--flash_size",
         flash_size,
-        "0x0",
+        bootloader_offset,
         bootloader,
         "0x8000",
         partitions,
