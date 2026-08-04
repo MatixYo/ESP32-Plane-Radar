@@ -4,18 +4,30 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
+#include <time.h>
+
+#ifdef BOARD_NM_TV_154
+#include <WiFi.h>
+#endif
 
 #include "config.h"
 #include "hardware/display.h"
 #include "hardware/display_font.h"
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
+#include "services/time_settings.h"
 #include "ui/radar_range.h"
+#include "ui/radar_render_policy.h"
 #include "ui/radar_theme.h"
 #include "ui/runway_overlay.h"
+#ifdef BOARD_NM_TV_154
+#include "ui/square_status.h"
+#include "ui/nm_tv_154_policy.h"
+#endif
 
-namespace fonts = lgfx::v1::fonts;
+namespace radar_fonts = lgfx::v1::fonts;
 
 namespace ui {
 namespace radar {
@@ -40,10 +52,13 @@ bool s_cardinal_use_vlw = false;
 bool s_scale_use_vlw = false;
 float s_cardinal_vlw_size = 0.56f;
 float s_scale_vlw_size = 0.50f;
+bool s_corner_value_use_vlw = false;
+float s_corner_value_vlw_size = 0.9f;
 float s_tag_vlw_size = 0.56f;
-const lgfx::GFXfont* s_cardinal_gfx = &fonts::FreeSansBold12pt7b;
-const lgfx::GFXfont* s_scale_gfx = &fonts::FreeSansBold9pt7b;
-const lgfx::GFXfont* s_tag_gfx = &fonts::FreeSansBold12pt7b;
+const lgfx::GFXfont* s_cardinal_gfx = &radar_fonts::FreeSansBold12pt7b;
+const lgfx::GFXfont* s_scale_gfx = &radar_fonts::FreeSansBold9pt7b;
+const lgfx::GFXfont* s_corner_value_gfx = &radar_fonts::FreeSansBold18pt7b;
+const lgfx::GFXfont* s_tag_gfx = &radar_fonts::FreeSansBold12pt7b;
 
 bool s_tag_label_metrics_ready = false;
 bool s_tag_use_vlw = false;
@@ -54,6 +69,16 @@ int s_scale_label_h = 0;
 lgfx::LovyanGFX* s_draw = &tft;
 LGFX_Sprite s_frame(&tft);
 bool s_frame_ready = false;
+
+#ifdef BOARD_NM_TV_154
+bool s_has_data_update = false;
+unsigned long s_last_data_update_ms = 0;
+uint16_t s_corner_green = 0;
+uint16_t s_corner_amber = 0;
+uint16_t s_corner_cyan = 0;
+uint16_t s_corner_red = 0;
+uint16_t s_corner_muted = 0;
+#endif
 
 class DrawScope {
  public:
@@ -114,6 +139,7 @@ void initLabelMetrics() {
   }
 
   const int cardinal_target = radar::kCardinalLabelHeightPx;
+  constexpr int kCornerValueTargetHeightPx = 24;
 
   if (displayFontIsSmooth()) {
     s_cardinal_use_vlw = true;
@@ -122,19 +148,25 @@ void initLabelMetrics() {
     const int scale_target = cardinal_h - radar::kScaleBelowCardinalPx;
     s_scale_use_vlw = true;
     s_scale_vlw_size = findVlwSizeForHeight(scale_target);
+    s_corner_value_use_vlw = true;
+    s_corner_value_vlw_size = findVlwSizeForHeight(kCornerValueTargetHeightPx);
   } else {
-    const lgfx::GFXfont* cardinal_candidates[] = {&fonts::FreeSansBold12pt7b,
-                                                  &fonts::FreeSansBold9pt7b};
+    const lgfx::GFXfont* cardinal_candidates[] = {
+        &radar_fonts::FreeSansBold12pt7b,
+        &radar_fonts::FreeSansBold9pt7b};
     s_cardinal_gfx =
         pickGfxFontClosest(cardinal_target, cardinal_candidates, 2);
     s_cardinal_use_vlw = false;
 
     const int cardinal_h = measureGfxHeight(*s_cardinal_gfx);
     const int scale_target = cardinal_h - radar::kScaleBelowCardinalPx;
-    const lgfx::GFXfont* scale_candidates[] = {&fonts::FreeSansBold9pt7b,
-                                               &fonts::FreeSansBold12pt7b};
+    const lgfx::GFXfont* scale_candidates[] = {
+        &radar_fonts::FreeSansBold9pt7b,
+        &radar_fonts::FreeSansBold12pt7b};
     s_scale_gfx = pickGfxFontClosest(scale_target, scale_candidates, 2);
     s_scale_use_vlw = false;
+    s_corner_value_gfx = &radar_fonts::FreeSansBold18pt7b;
+    s_corner_value_use_vlw = false;
   }
 
   applyScaleStyle();
@@ -165,13 +197,21 @@ void initTagLabelMetrics() {
     s_tag_use_vlw = true;
     s_tag_vlw_size = findVlwSizeForHeight(target);
   } else {
-    const lgfx::GFXfont* tag_candidates[] = {&fonts::FreeSansBold12pt7b,
-                                               &fonts::FreeSansBold9pt7b};
+    const lgfx::GFXfont* tag_candidates[] = {
+        &radar_fonts::FreeSansBold12pt7b,
+        &radar_fonts::FreeSansBold9pt7b};
     s_tag_gfx = pickGfxFontClosest(target, tag_candidates, 2);
     s_tag_use_vlw = false;
   }
 
   s_tag_label_metrics_ready = true;
+}
+
+uint16_t logicalColor565(uint8_t red, uint8_t green, uint8_t blue) {
+  if (config::kDisplayRgbOrder) {
+    return tft.color565(blue, green, red);
+  }
+  return tft.color565(red, green, blue);
 }
 
 void initPalette() {
@@ -197,6 +237,13 @@ void initPalette() {
       tft.color565(radar::kRunwayR, radar::kRunwayG, radar::kRunwayB);
   radar::kColorRunwayLabel = tft.color565(radar::kRunwayLabelR, radar::kRunwayLabelG,
                                           radar::kRunwayLabelB);
+#ifdef BOARD_NM_TV_154
+  s_corner_green = logicalColor565(54, 220, 110);
+  s_corner_amber = logicalColor565(255, 190, 70);
+  s_corner_cyan = logicalColor565(65, 205, 235);
+  s_corner_red = logicalColor565(255, 75, 75);
+  s_corner_muted = logicalColor565(95, 125, 145);
+#endif
 }
 
 constexpr float kKmPerDeg = 111.0f;
@@ -559,6 +606,14 @@ void applyScaleStyle() {
   }
 }
 
+void applyCornerValueStyle() {
+  if (s_corner_value_use_vlw) {
+    displayFontSetSmoothSize(*s_draw, s_corner_value_vlw_size);
+  } else {
+    displayFontSetBitmap(*s_draw, s_corner_value_gfx);
+  }
+}
+
 void drawCardinalLabel(const char* text, int x, int y, textdatum_t datum) {
   applyCardinalStyle();
   s_draw->setTextDatum(datum);
@@ -636,6 +691,106 @@ void drawScaleLabel(int cx, int cy, int outer_radius) {
                                scaleLabelAnchorX(cx, outer_radius), cy);
 }
 
+#ifdef BOARD_NM_TV_154
+void drawCornerTime(const nm_tv_154::CornerTelemetryLayout& layout,
+                    int value_height, int right, bool clear_value_area) {
+  char value[12];
+  tm local_time = {};
+  uint16_t time_color = s_corner_muted;
+  if (getLocalTime(&local_time, 0)) {
+    strftime(value, sizeof(value),
+             services::time_settings::uses24HourClock() ? "%H:%M" : "%I:%M %p",
+             &local_time);
+    time_color = s_corner_cyan;
+  } else {
+    snprintf(value, sizeof(value), "--");
+  }
+
+  applyCornerValueStyle();
+  if (clear_value_area) {
+    const int max_width = s_draw->textWidth("88:88 PM");
+    s_draw->fillRect(right - max_width, layout.bottom_value_y - value_height,
+                     max_width + 1, value_height + 1, radar::kColorBackground);
+  }
+  s_draw->setTextDatum(textdatum_t::bottom_right);
+  s_draw->setTextColor(time_color, radar::kColorBackground);
+  s_draw->drawString(value, right, layout.bottom_value_y);
+}
+#endif
+
+void drawCornerTelemetry() {
+#ifdef BOARD_NM_TV_154
+  constexpr int kEdge = 5;
+  constexpr int kValueGap = 2;
+  const int kRight = radar::kSize - kEdge;
+
+  const bool wifi_connected = WiFi.status() == WL_CONNECTED;
+
+  s_draw->setFont(&radar_fonts::Font0);
+  s_draw->setTextSize(1);
+  const int label_height = s_draw->fontHeight();
+  applyCornerValueStyle();
+  const int value_height = s_draw->fontHeight();
+  const nm_tv_154::CornerTelemetryLayout layout =
+      nm_tv_154::cornerTelemetryLayout(radar::kSize, kEdge, label_height,
+                                       value_height, kValueGap);
+
+  s_draw->setFont(&radar_fonts::Font0);
+  s_draw->setTextSize(1);
+  s_draw->setTextColor(s_corner_muted);
+  s_draw->setTextDatum(textdatum_t::top_left);
+  s_draw->drawString("WIFI", kEdge, layout.top_label_y);
+
+  const uint8_t bars =
+      square::wifiBars(wifi_connected, wifi_connected ? WiFi.RSSI() : -100);
+  if (wifi_connected) {
+    constexpr int kBarWidth = 3;
+    constexpr int kBarGap = 2;
+    constexpr int kBarHeights[] = {3, 5, 8, 11};
+    const int bar_baseline = layout.top_value_y + value_height;
+    for (uint8_t i = 0; i < 4; ++i) {
+      const int x = kEdge + i * (kBarWidth + kBarGap);
+      const int height = kBarHeights[i];
+      const uint16_t color = i < bars ? s_corner_green : s_corner_muted;
+      s_draw->fillRect(x, bar_baseline - height + 1, kBarWidth, height, color);
+    }
+  } else {
+    s_draw->drawLine(kEdge, layout.top_value_y, kEdge + 15,
+                     layout.top_value_y + 13,
+                     s_corner_red);
+    s_draw->drawLine(kEdge + 15, layout.top_value_y, kEdge,
+                     layout.top_value_y + 13,
+                     s_corner_red);
+  }
+
+  char value[12];
+  applyCornerValueStyle();
+  s_draw->setTextDatum(textdatum_t::top_right);
+  s_draw->setTextColor(s_corner_green);
+  snprintf(value, sizeof(value), "%u",
+           static_cast<unsigned>(services::adsb::aircraftCount()));
+  s_draw->drawString(value, kRight, layout.top_value_y);
+
+  s_draw->setFont(&radar_fonts::Font0);
+  s_draw->setTextSize(1);
+  s_draw->setTextColor(s_corner_muted);
+  s_draw->setTextDatum(textdatum_t::top_right);
+  s_draw->drawString("AIR", kRight, layout.top_label_y);
+  s_draw->setTextDatum(textdatum_t::top_left);
+  s_draw->drawString("RANGE", kEdge, layout.bottom_label_y);
+  s_draw->setTextDatum(textdatum_t::top_right);
+  s_draw->drawString("TIME", kRight, layout.bottom_label_y);
+
+  applyCornerValueStyle();
+  s_draw->setTextDatum(textdatum_t::bottom_left);
+  s_draw->setTextColor(s_corner_amber);
+  radar::formatCurrentRing3Label(value, sizeof(value));
+  s_draw->drawString(value, kEdge, layout.bottom_value_y);
+
+  drawCornerTime(layout, value_height, kRight, false);
+#endif
+}
+
 template <typename Gfx>
 void drawStaticGrid(Gfx& gfx) {
   initLabelMetrics();
@@ -652,11 +807,23 @@ void drawStaticGrid(Gfx& gfx) {
   runway::drawLargeAirportRunways(gfx);
   drawCenterDot(cx, cy);
   drawCardinalLabels();
+#ifndef BOARD_NM_TV_154
   drawScaleLabel(cx, cy, grid_r);
+#endif
   gfx.setTextDatum(textdatum_t::top_left);
 }
 
 bool ensureFrameSprite() {
+#ifdef BOARD_NM_TV_154
+  constexpr bool kFrameSpriteEnabled =
+      radar::frameSpriteEnabledForBoard(true);
+#else
+  constexpr bool kFrameSpriteEnabled =
+      radar::frameSpriteEnabledForBoard(false);
+#endif
+  if (!kFrameSpriteEnabled) {
+    return false;
+  }
   if (s_frame_ready) {
     return true;
   }
@@ -676,6 +843,7 @@ void renderFrame() {
   drawStaticGrid(s_frame);  // opens its own DrawScope(s_frame)
   {
     const DrawScope scope(s_frame);
+    drawCornerTelemetry();
     drawAircraft();
   }
   s_frame.pushSprite(0, 0);
@@ -696,6 +864,7 @@ void radarDisplayDraw() {
   // Fallback when the sprite can't be allocated: draw straight to the panel.
   const DrawScope scope(tft);
   drawStaticGrid(tft);
+  drawCornerTelemetry();
   drawAircraft();
   tft.setTextDatum(textdatum_t::top_left);
 }
@@ -709,6 +878,37 @@ void radarDisplayRefreshAircraft() {
   }
 
   radarDisplayDraw();
+}
+
+void radarDisplayRefreshStatus() {
+#ifdef BOARD_NM_TV_154
+  initPalette();
+  initLabelMetrics();
+  const DrawScope scope(tft);
+  constexpr int kEdge = 5;
+  constexpr int kValueGap = 2;
+  const int right = radar::kSize - kEdge;
+
+  tft.setFont(&radar_fonts::Font0);
+  tft.setTextSize(1);
+  const int label_height = tft.fontHeight();
+  applyCornerValueStyle();
+  const int value_height = tft.fontHeight();
+  const nm_tv_154::CornerTelemetryLayout layout =
+      nm_tv_154::cornerTelemetryLayout(radar::kSize, kEdge, label_height,
+                                       value_height, kValueGap);
+  drawCornerTime(layout, value_height, right, true);
+  tft.setTextDatum(textdatum_t::top_left);
+#endif
+}
+
+void radarDisplayMarkDataUpdated(unsigned long now_ms) {
+#ifdef BOARD_NM_TV_154
+  s_last_data_update_ms = now_ms;
+  s_has_data_update = true;
+#else
+  (void)now_ms;
+#endif
 }
 
 }  // namespace ui
