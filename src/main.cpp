@@ -20,6 +20,7 @@ bool g_radar_visible = false;
 unsigned long g_wifi_down_since = 0;
 unsigned long g_last_reconnect_ms = 0;
 unsigned long g_last_adsb_fetch_ms = 0;
+unsigned long g_last_info_refresh_ms = 0;
 
 void showRadarIfConnected() {
   if (WiFi.status() != WL_CONNECTED) {
@@ -49,15 +50,24 @@ void handleBootButton() {
   }
 }
 
+void handleKeyButton() {
+  keyButtonPollLongPress();
+  if (keyButtonConsumeTap()) {
+    onRangeTap();
+  }
+}
+
 void fetchAndDrawAircraft() {
   const float fetch_km = ui::radar::fetchRadiusKm();
   if (!services::adsb::fetchUpdate(services::location::lat(),
                                    services::location::lon(), fetch_km)) {
     handleBootButton();
+    handleKeyButton();
     return;
   }
   ui::radarDisplayRefreshAircraft();
   handleBootButton();
+  handleKeyButton();
 }
 
 }  // namespace
@@ -69,6 +79,7 @@ void setup() {
   Serial.println("Plane Radar");
 
   bootButtonInit();
+  keyButtonInit();
   displayInit();
   if (wifiShowsSetupScreenOnBoot()) {
     statusScreenPortal();
@@ -84,6 +95,7 @@ void setup() {
 
 void loop() {
   handleBootButton();
+  handleKeyButton();
   wifiLoop();
 
   if (WiFi.status() != WL_CONNECTED) {
@@ -109,9 +121,17 @@ void loop() {
     g_wifi_down_since = 0;
     if (!g_radar_visible) {
       showRadarIfConnected();
-    } else if (millis() - g_last_adsb_fetch_ms >= config::kAdsbFetchIntervalMs) {
-      g_last_adsb_fetch_ms = millis();
-      fetchAndDrawAircraft();
+    } else {
+      const unsigned long now = millis();
+      if (now - g_last_adsb_fetch_ms >= config::kAdsbFetchIntervalMs) {
+        fetchAndDrawAircraft();
+        const unsigned long after_fetch_ms = millis();
+        g_last_adsb_fetch_ms = after_fetch_ms;
+        g_last_info_refresh_ms = after_fetch_ms;
+      } else if (now - g_last_info_refresh_ms >= 1000UL) {
+        g_last_info_refresh_ms = now;
+        ui::radarDisplayRefreshInfo();
+      }
     }
   }
 

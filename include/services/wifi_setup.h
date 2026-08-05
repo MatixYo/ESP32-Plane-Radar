@@ -16,3 +16,9 @@ void bootButtonInit();
 bool bootButtonConsumeTap();
 /** Call each loop iteration; triggers WiFi reset on long hold. */
 void bootButtonPollLongPress();
+/** GPIO + interrupt setup for encoder KEY (GPIO9); ONX2424G013 only. */
+void keyButtonInit();
+/** Latched short tap on KEY button. */
+bool keyButtonConsumeTap();
+/** Call each loop iteration; triggers WiFi reset on long hold. */
+void keyButtonPollLongPress();
