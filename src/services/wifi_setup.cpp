@@ -57,6 +57,10 @@ namespace {
 /** Separate from planeradar prefs (rangeInit) to avoid NVS handle conflicts. */
 constexpr char kWifiPrefsNamespace[] = "wifi";
 constexpr char kPrefsForcePortalKey[] = "portal";
+constexpr char kPrefsSavedNetworkCountKey[] = "net_count";
+constexpr char kPrefsSavedNetworkSsidPrefix[] = "net_ssid_";
+constexpr char kPrefsSavedNetworkPassPrefix[] = "net_pass_";
+constexpr size_t kMaxSavedNetworks = 8;
 
 bool s_force_config_portal = false;
 WiFiManager s_wm;
@@ -71,6 +75,15 @@ constexpr int kCoordParamLen = 20;
 constexpr char kCoordInputAttrs[] =
     " type=\"number\" step=\"0.000001\"";
 
+struct SavedWifiNetwork {
+  String ssid;
+  String password;
+};
+
+SavedWifiNetwork s_saved_wifi_networks[kMaxSavedNetworks];
+size_t s_saved_wifi_network_count = 0;
+bool s_saved_wifi_networks_loaded = false;
+
 WiFiManagerParameter s_param_lat("radar_lat", "Latitude (deg)", "0",
                                 kCoordParamLen, kCoordInputAttrs);
 WiFiManagerParameter s_param_lon("radar_lon", "Longitude (deg)", "0",
@@ -83,6 +96,152 @@ WiFiManagerParameter s_param_miles("use_miles", "Display distances in miles", "T
 char s_runways_checkbox_attrs[32] = "type=\"checkbox\"";
 WiFiManagerParameter s_param_runways("show_runways", "Show airport runways", "T", 2,
                                      s_runways_checkbox_attrs, WFM_LABEL_AFTER);
+
+char s_current_wifi_attrs[16] = " readonly";
+WiFiManagerParameter s_param_current_wifi("current_wifi", "Current Wi-Fi", "",
+                                          64, s_current_wifi_attrs);
+
+void loadSavedNetworks() {
+  if (s_saved_wifi_networks_loaded) {
+    return;
+  }
+
+  Preferences prefs;
+  if (!prefs.begin(kWifiPrefsNamespace, true)) {
+    s_saved_wifi_networks_loaded = true;
+    return;
+  }
+
+  s_saved_wifi_network_count = 0;
+  const uint8_t count = prefs.getUChar(kPrefsSavedNetworkCountKey, 0);
+  for (uint8_t i = 0; i < count && s_saved_wifi_network_count < kMaxSavedNetworks; ++i) {
+    const String ssid_key = String(kPrefsSavedNetworkSsidPrefix) + String(i);
+    const String pass_key = String(kPrefsSavedNetworkPassPrefix) + String(i);
+    const String ssid = prefs.getString(ssid_key.c_str(), "");
+    const String pass = prefs.getString(pass_key.c_str(), "");
+    if (ssid.length() == 0) {
+      continue;
+    }
+    s_saved_wifi_networks[s_saved_wifi_network_count].ssid = ssid;
+    s_saved_wifi_networks[s_saved_wifi_network_count].password = pass;
+    ++s_saved_wifi_network_count;
+  }
+
+  prefs.end();
+  s_saved_wifi_networks_loaded = true;
+}
+
+void saveSavedNetworks() {
+  Preferences prefs;
+  if (!prefs.begin(kWifiPrefsNamespace, false)) {
+    return;
+  }
+
+  prefs.putUChar(kPrefsSavedNetworkCountKey,
+                 static_cast<uint8_t>(s_saved_wifi_network_count));
+  for (size_t i = 0; i < s_saved_wifi_network_count; ++i) {
+    const String ssid_key = String(kPrefsSavedNetworkSsidPrefix) + String(i);
+    const String pass_key = String(kPrefsSavedNetworkPassPrefix) + String(i);
+    prefs.putString(ssid_key.c_str(), s_saved_wifi_networks[i].ssid.c_str());
+    prefs.putString(pass_key.c_str(), s_saved_wifi_networks[i].password.c_str());
+  }
+  for (size_t i = s_saved_wifi_network_count; i < kMaxSavedNetworks; ++i) {
+    const String ssid_key = String(kPrefsSavedNetworkSsidPrefix) + String(i);
+    const String pass_key = String(kPrefsSavedNetworkPassPrefix) + String(i);
+    prefs.remove(ssid_key.c_str());
+    prefs.remove(pass_key.c_str());
+  }
+
+  prefs.end();
+}
+
+void addSavedWifiNetwork(const String& ssid, const String& password) {
+  if (ssid.length() == 0) {
+    return;
+  }
+
+  loadSavedNetworks();
+  for (size_t i = 0; i < s_saved_wifi_network_count; ++i) {
+    if (s_saved_wifi_networks[i].ssid.equalsIgnoreCase(ssid)) {
+      s_saved_wifi_networks[i].password = password;
+      if (i > 0) {
+        SavedWifiNetwork entry = s_saved_wifi_networks[i];
+        for (size_t j = i; j > 0; --j) {
+          s_saved_wifi_networks[j] = s_saved_wifi_networks[j - 1];
+        }
+        s_saved_wifi_networks[0] = entry;
+      }
+      saveSavedNetworks();
+      return;
+    }
+  }
+
+  if (s_saved_wifi_network_count < kMaxSavedNetworks) {
+    s_saved_wifi_networks[s_saved_wifi_network_count] = SavedWifiNetwork{ssid, password};
+    ++s_saved_wifi_network_count;
+  } else {
+    for (size_t i = kMaxSavedNetworks - 1; i > 0; --i) {
+      s_saved_wifi_networks[i] = s_saved_wifi_networks[i - 1];
+    }
+    s_saved_wifi_networks[0] = SavedWifiNetwork{ssid, password};
+  }
+
+  saveSavedNetworks();
+}
+
+void clearSavedWifiNetworks() {
+  s_saved_wifi_network_count = 0;
+  s_saved_wifi_networks_loaded = true;
+  for (size_t i = 0; i < kMaxSavedNetworks; ++i) {
+    s_saved_wifi_networks[i].ssid = "";
+    s_saved_wifi_networks[i].password = "";
+  }
+
+  Preferences prefs;
+  if (!prefs.begin(kWifiPrefsNamespace, false)) {
+    return;
+  }
+  prefs.remove(kPrefsSavedNetworkCountKey);
+  for (size_t i = 0; i < kMaxSavedNetworks; ++i) {
+    const String ssid_key = String(kPrefsSavedNetworkSsidPrefix) + String(i);
+    const String pass_key = String(kPrefsSavedNetworkPassPrefix) + String(i);
+    prefs.remove(ssid_key.c_str());
+    prefs.remove(pass_key.c_str());
+  }
+  prefs.end();
+}
+
+String buildCurrentWifiShareText() {
+  String share_text;
+  if (WiFi.status() == WL_CONNECTED) {
+    share_text = WiFi.SSID();
+    share_text += " @ ";
+    share_text += WiFi.localIP().toString();
+  } else {
+    share_text = "Not connected";
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    const String password = WiFi.psk();
+    share_text += password.length() > 0 ? " | password available" : " | password unavailable";
+  }
+  return share_text;
+}
+
+void rememberCurrentWifiNetwork() {
+  if (WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+
+  const String ssid = WiFi.SSID();
+  if (ssid.length() == 0) {
+    return;
+  }
+
+  const String password = WiFi.psk();
+  addSavedWifiNetwork(ssid, password);
+  Serial.printf("Saved Wi-Fi profile: %s\n", ssid.c_str());
+}
 
 void refreshPortalParamDefaults() {
   char lat_buf[kCoordParamLen + 1];
@@ -97,6 +256,8 @@ void refreshPortalParamDefaults() {
   snprintf(s_runways_checkbox_attrs, sizeof(s_runways_checkbox_attrs),
            "type=\"checkbox\"%s", ui::radar::showRunways() ? " checked" : "");
   s_param_runways.setValue("T", 2);
+  const String current_wifi = buildCurrentWifiShareText();
+  s_param_current_wifi.setValue(current_wifi.c_str(), current_wifi.length());
 }
 
 void onPortalParamsSaved() {
@@ -114,6 +275,7 @@ void attachPortalParams(WiFiManager& wm) {
   wm.addParameter(&s_param_lon);
   wm.addParameter(&s_param_miles);
   wm.addParameter(&s_param_runways);
+  wm.addParameter(&s_param_current_wifi);
   wm.setSaveParamsCallback(onPortalParamsSaved);
 }
 
@@ -156,17 +318,8 @@ bool consumeForceConfigPortal() {
 }
 
 bool storedWifiCredentials() {
-  wifi_mode_t mode = WIFI_MODE_NULL;
-  if (esp_wifi_get_mode(&mode) != ESP_OK || mode == WIFI_MODE_NULL) {
-    WiFi.mode(WIFI_STA);
-    delay(50);
-  }
-
-  wifi_config_t conf = {};
-  if (esp_wifi_get_config(WIFI_IF_STA, &conf) != ESP_OK) {
-    return false;
-  }
-  return conf.sta.ssid[0] != '\0';
+  loadSavedNetworks();
+  return s_saved_wifi_network_count > 0;
 }
 
 void eraseWifiCredentials() {
@@ -175,6 +328,7 @@ void eraseWifiCredentials() {
   WiFi.mode(WIFI_OFF);
   delay(100);
 
+  clearSavedWifiNetworks();
   ensureWifiManager();
   WiFi.persistent(true);
   s_wm.resetSettings();
@@ -321,12 +475,18 @@ bool connectSavedNetwork(bool show_ui) {
   }
 
   ensureWifiManager();
-  const String ssid = s_wm.getWiFiSSID();
-  if (ssid.length() == 0) {
-    return false;
+  loadSavedNetworks();
+  for (size_t i = 0; i < s_saved_wifi_network_count; ++i) {
+    const SavedWifiNetwork& network = s_saved_wifi_networks[i];
+    if (network.ssid.length() == 0) {
+      continue;
+    }
+    if (tryConnectWithUi(network.ssid, network.password, show_ui)) {
+      rememberCurrentWifiNetwork();
+      return true;
+    }
   }
-  const String pass = s_wm.getWiFiPass();
-  return tryConnectWithUi(ssid, pass, show_ui);
+  return false;
 }
 
 bool openConfigPortal() {
@@ -447,6 +607,7 @@ bool wifiSetupConnect() {
     Serial.println("Opening WiFi setup portal (after reset)");
     if (openConfigPortal() && wifiLinkUp()) {
       WiFi.setAutoReconnect(true);
+      rememberCurrentWifiNetwork();
       Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
                     WiFi.localIP().toString().c_str());
       return true;
@@ -480,6 +641,7 @@ bool wifiSetupConnect() {
 
   if (openConfigPortal() && wifiLinkUp()) {
     WiFi.setAutoReconnect(true);
+    rememberCurrentWifiNetwork();
     Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
                   WiFi.localIP().toString().c_str());
     return true;
