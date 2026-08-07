@@ -6,6 +6,10 @@
 
 Firmware for an **ESP32-C3 Super Mini** and a **1.28″ round GC9A01** display (240×240). Shows a circular **ADS-B radar** around your configured location, with **WiFiManager** for first-time setup.
 
+The RockBase IoT Team adds support for **NM-TV-154**: **ESP32** + **1.54″ square ST7789** display (240×240).
+
+![NM-TV-154](docs/images/nm-tv-154.jpg)
+
 ## What it does
 
 1. **Wi‑Fi setup** (if needed) — captive portal on AP **`PlaneRadar-Setup`**
@@ -21,6 +25,18 @@ After Wi‑Fi is saved, the device reconnects automatically; the radar runs in t
 | **Hold 3 s** | Clear Wi‑Fi, location, and units; reboot into setup portal |
 
 During setup you can also hold BOOT at power-on to force a credential reset (same as the long press).
+
+### NM-TV-154 touch control
+
+On **NM-TV-154**, the onboard capacitive touch key **T9 / GPIO32** can also cycle the same range presets (**5 → 10 → 15 → 25 km**).  
+Validated board signals:
+
+| Signal | Value |
+|--------|-------|
+| Display | ST7789, 240×240 |
+| LCD power | GPIO **21** (`LOW = enabled`) |
+| Backlight | GPIO **19** (`active LOW`) |
+| Touch | **T9 / GPIO32** |
 
 ## Wi‑Fi setup portal
 
@@ -158,13 +174,28 @@ pio run -t upload
 pio device monitor
 ```
 
-- PlatformIO env: **`supermini`**
+- PlatformIO envs: **`supermini`**, **`nm-tv-154`**
+- Current default env in `platformio.ini`: **`nm-tv-154`**
 - Serial: **115200** baud
 - USB CDC on boot enabled in `platformio.ini` for the Super Mini
 
+### NM-TV-154 build
+
+```bash
+pio run -e nm-tv-154
+pio run -e nm-tv-154 -t upload
+```
+
+For split-image flashing on **NM-TV-154** (**ESP32**), the standard offsets are:
+
+- `bootloader.bin` → **0x1000**
+- `partitions.bin` → **0x8000**
+- `boot_app0.bin` → **0xE000**
+- `firmware.bin` → **0x10000**
+
 ### Web-flashable release image
 
-Single `.bin` for [esptool-js](https://espressif.github.io/esptool-js/) and similar tools (ESP32-C3, 4 MB, flash at **0x0**):
+Single `.bin` for [esptool-js](https://espressif.github.io/esptool-js/) and similar tools (ESP32-C3, 4 MB, flash at **0x0**). For flashing NM-TV-154, can use [RockBase IoT WebFlasher](https://flash.rockbaseiot.com) one-click flash, choose Project: **ESP32-Plane-Radar**, Device: **NM-TV-154**.:
 
 ```bash
 chmod +x scripts/merge-firmware.sh   # once

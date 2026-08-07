@@ -6,6 +6,8 @@
 
 namespace config {
 
+constexpr char kFirmwareVersion[] = "v1.2.0";
+
 // --- Wi-Fi portal ---
 constexpr char kPortalApName[] = "PlaneRadar-Setup";
 constexpr char kPortalIp[] = "192.168.4.1";
@@ -22,6 +24,9 @@ constexpr unsigned long kWifiConnectingFrameMs = 50;
 constexpr unsigned long kWifiDownGraceMs = 4000;
 /** Minimum interval between background reconnect tries. */
 constexpr unsigned long kWifiReconnectIntervalMs = 15000;
+/** Amsterdam local time, matching the default radar location; includes DST. */
+constexpr char kLocalTimeZone[] = "CET-1CEST,M3.5.0,M10.5.0/3";
+constexpr char kNtpServer[] = "pool.ntp.org";
 
 // --- BOOT button (ESP32-C3 Super Mini, active LOW) ---
 constexpr gpio_num_t kBootPin = GPIO_NUM_9;
@@ -29,12 +34,21 @@ constexpr unsigned long kBootResetHoldMs = 3000UL;
 /** Ignore BOOT taps shorter than this (debounce). */
 constexpr unsigned long kBootTapMinMs = 40UL;
 
+// --- Display: 240x240 SPI panel ---
+#ifdef BOARD_NM_TV_154
+constexpr int kDisplayPinRst = -1;
+constexpr int kDisplayPinCs = 15;
+constexpr int kDisplayPinDc = 2;
+constexpr int kDisplayPinMosi = 13;
+constexpr int kDisplayPinSclk = 14;
+#else
 // --- Display: GC9A01 1.28" round 240×240 (SPI) ---
-constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_0;
-constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_1;
-constexpr gpio_num_t kDisplayPinDc = GPIO_NUM_10;
-constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_3;  // display SDA
-constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_4;  // display SCL
+constexpr int kDisplayPinRst = GPIO_NUM_0;
+constexpr int kDisplayPinCs = GPIO_NUM_1;
+constexpr int kDisplayPinDc = GPIO_NUM_10;
+constexpr int kDisplayPinMosi = GPIO_NUM_3;  // display SDA
+constexpr int kDisplayPinSclk = GPIO_NUM_4;  // display SCL
+#endif
 
 constexpr int kDisplayWidth = 240;
 constexpr int kDisplayHeight = 240;
@@ -42,7 +56,12 @@ constexpr int kDisplayHeight = 240;
 constexpr uint32_t kDisplaySpiWriteHz = 40000000;
 // GC9A01 modules often need invert + BGR for correct black/green output
 constexpr bool kDisplayInvert = true;
+#ifdef BOARD_NM_TV_154
+// TFT_eSPI's ST7789 + CGRAM_OFFSET default selects BGR (MADCTL bit set).
+constexpr bool kDisplayRgbOrder = false;
+#else
 constexpr bool kDisplayRgbOrder = true;
+#endif
 
 // --- Radar center defaults (overridden via WiFi setup portal) ---
 constexpr double kDefaultRadarLat = 52.3676;

@@ -2,12 +2,16 @@
 
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/portmacro.h>
 
 #include <ArduinoJson.h>
 
+#include <algorithm>
 #include <cstring>
 
 #include "config.h"
+#include "services/aircraft_motion.h"
 
 namespace services::adsb {
 
@@ -18,9 +22,46 @@ constexpr float kKmPerNm = 1.852f;
 constexpr int kConnectAttemptMs = 200;
 constexpr unsigned long kRequestTimeoutMs = 10000;
 
-Aircraft s_aircraft[kMaxAircraft];
+using motion::AircraftTrack;
+
+AircraftTrack s_tracks[kMaxAircraft];
+AircraftTrack s_next_tracks[kMaxAircraft];
+Aircraft s_incoming[kMaxAircraft];
+Aircraft s_display[kMaxAircraft];
 size_t s_aircraft_count = 0;
 PollFn s_poll_fn = nullptr;
+portMUX_TYPE s_tracks_lock = portMUX_INITIALIZER_UNLOCKED;
+
+int findTrackById(const char* id) {
+  if (id == nullptr || id[0] == '\0') {
+    return -1;
+  }
+  for (size_t i = 0; i < s_aircraft_count; ++i) {
+    if (strcmp(s_tracks[i].aircraft.id, id) == 0) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+
+void replaceTracks(const Aircraft* incoming, size_t count,
+                   unsigned long now_ms) {
+  taskENTER_CRITICAL(&s_tracks_lock);
+  for (size_t i = 0; i < count; ++i) {
+    const int previous = motion::hasStableId(incoming[i])
+                             ? findTrackById(incoming[i].id)
+                             : -1;
+    s_next_tracks[i] = previous >= 0
+                           ? motion::updateTrack(s_tracks[previous], incoming[i],
+                                                 now_ms)
+                           : motion::makeInitialTrack(incoming[i], now_ms);
+  }
+  for (size_t i = 0; i < count; ++i) {
+    s_tracks[i] = s_next_tracks[i];
+  }
+  s_aircraft_count = count;
+  taskEXIT_CRITICAL(&s_tracks_lock);
+}
 
 void pollNetwork() {
   if (s_poll_fn != nullptr) {
@@ -53,9 +94,8 @@ bool readResponseBodyWithPoll(HTTPClient& http, String& payload) {
   }
 
   const int content_length = http.getSize();
-  if (content_length > 0) {
-    payload.reserve(static_cast<unsigned>(content_length + 1));
-  }
+  (void)content_length;
+  payload.reserve(4096);
 
   uint8_t buffer[512];
   const unsigned long deadline = millis() + kRequestTimeoutMs;
@@ -188,9 +228,11 @@ void formatAltitudeTag(const JsonObject& plane, char* out, size_t out_len) {
 }
 
 void fillTagFields(Aircraft* ac, const JsonObject& plane) {
+  copyJsonStringTrimmed(plane, "hex", ac->id, sizeof(ac->id));
   copyJsonStringTrimmed(plane, "flight", ac->callsign, sizeof(ac->callsign));
   if (ac->callsign[0] == '\0') {
-    copyJsonStringTrimmed(plane, "hex", ac->callsign, sizeof(ac->callsign));
+    strncpy(ac->callsign, ac->id, sizeof(ac->callsign) - 1);
+    ac->callsign[sizeof(ac->callsign) - 1] = '\0';
   }
 
   copyJsonStringTrimmed(plane, "t", ac->type, sizeof(ac->type));
@@ -201,9 +243,29 @@ void fillTagFields(Aircraft* ac, const JsonObject& plane) {
 
 void setPollFn(PollFn fn) { s_poll_fn = fn; }
 
-size_t aircraftCount() { return s_aircraft_count; }
+size_t aircraftCount() {
+  taskENTER_CRITICAL(&s_tracks_lock);
+  const size_t count = s_aircraft_count;
+  taskEXIT_CRITICAL(&s_tracks_lock);
+  return count;
+}
 
-const Aircraft* aircraftList() { return s_aircraft; }
+const Aircraft* aircraftList(unsigned long now_ms, size_t* count) {
+  taskENTER_CRITICAL(&s_tracks_lock);
+  const size_t display_count = s_aircraft_count;
+  for (size_t i = 0; i < display_count; ++i) {
+    s_display[i] = s_tracks[i].aircraft;
+    const motion::Position position =
+        motion::displayPosition(s_tracks[i], now_ms);
+    s_display[i].lat = position.lat;
+    s_display[i].lon = position.lon;
+  }
+  taskEXIT_CRITICAL(&s_tracks_lock);
+  if (count != nullptr) {
+    *count = display_count;
+  }
+  return s_display;
+}
 
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   const float dist_nm = kmToNauticalMiles(fetch_radius_km);
@@ -240,16 +302,26 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   }
   http.end();
 
-  JsonDocument doc;
+  const size_t payload_len = payload.length();
+  size_t doc_capacity = payload_len * 2u;
+  if (doc_capacity < 24 * 1024) {
+    doc_capacity = 24 * 1024;
+  }
+  if (doc_capacity > 96 * 1024) {
+    doc_capacity = 96 * 1024;
+  }
+
+  DynamicJsonDocument doc(doc_capacity);
   const DeserializationError err = deserializeJson(doc, payload);
   if (err) {
-    Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
+    Serial.printf("adsb: JSON parse error: %s (payload=%u bytes)\n",
+                  err.c_str(), static_cast<unsigned>(payload_len));
     return false;
   }
 
   JsonArray ac = doc["ac"].as<JsonArray>();
   if (ac.isNull()) {
-    s_aircraft_count = 0;
+    replaceTracks(nullptr, 0, millis());
     return true;
   }
 
@@ -265,16 +337,16 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
       continue;
     }
 
-    s_aircraft[n].lat = plane["lat"].as<float>();
-    s_aircraft[n].lon = plane["lon"].as<float>();
-    s_aircraft[n].nose_deg = pickNoseHeading(plane);
-    s_aircraft[n].track_deg = pickTrackHeading(plane);
-    s_aircraft[n].gs_knots = pickGroundSpeed(plane);
-    fillTagFields(&s_aircraft[n], plane);
+    s_incoming[n].lat = plane["lat"].as<float>();
+    s_incoming[n].lon = plane["lon"].as<float>();
+    s_incoming[n].nose_deg = pickNoseHeading(plane);
+    s_incoming[n].track_deg = pickTrackHeading(plane);
+    s_incoming[n].gs_knots = pickGroundSpeed(plane);
+    fillTagFields(&s_incoming[n], plane);
     ++n;
   }
 
-  s_aircraft_count = n;
+  replaceTracks(s_incoming, n, millis());
   Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
   return true;
 }

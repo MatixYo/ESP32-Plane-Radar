@@ -5,6 +5,7 @@
 namespace services::adsb {
 
 struct Aircraft {
+  char id[8];
   float lat;
   float lon;
   float nose_deg;
@@ -18,7 +19,7 @@ struct Aircraft {
 constexpr size_t kMaxAircraft = 64;
 
 size_t aircraftCount();
-const Aircraft* aircraftList();
+const Aircraft* aircraftList(unsigned long now_ms, size_t* count);
 
 /** Hook invoked during long HTTP I/O (e.g. wifiLoop). Optional. */
 using PollFn = void (*)();

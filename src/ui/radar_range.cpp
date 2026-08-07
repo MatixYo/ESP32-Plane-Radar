@@ -15,6 +15,7 @@ constexpr char kPrefsNamespace[] = "planeradar";
 constexpr char kPrefsRangeKey[] = "rangeIdx";
 constexpr char kPrefsMilesKey[] = "useMiles";
 constexpr char kPrefsRunwaysKey[] = "showRwys";
+constexpr char kPrefsSweepKey[] = "showSweep";
 constexpr uint8_t kDefaultRangeIndex = 1;  // 10 km ring
 constexpr float kKmPerMile = 1.609344f;
 
@@ -22,6 +23,7 @@ Preferences s_prefs;
 uint8_t s_range_index = kDefaultRangeIndex;
 bool s_use_miles = false;
 bool s_show_runways = true;
+bool s_show_sweep = true;
 
 void saveRangeIndex() {
   if (!s_prefs.begin(kPrefsNamespace, false)) {
@@ -44,6 +46,14 @@ void saveShowRunways() {
     return;
   }
   s_prefs.putBool(kPrefsRunwaysKey, s_show_runways);
+  s_prefs.end();
+}
+
+void saveShowSweep() {
+  if (!s_prefs.begin(kPrefsNamespace, false)) {
+    return;
+  }
+  s_prefs.putBool(kPrefsSweepKey, s_show_sweep);
   s_prefs.end();
 }
 
@@ -70,6 +80,7 @@ void rangeInit() {
       (saved < kRangePresetCount) ? saved : kDefaultRangeIndex;
   s_use_miles = s_prefs.getBool(kPrefsMilesKey, false);
   s_show_runways = s_prefs.getBool(kPrefsRunwaysKey, true);
+  s_show_sweep = s_prefs.getBool(kPrefsSweepKey, true);
   s_prefs.end();
 }
 
@@ -93,6 +104,8 @@ bool useMiles() { return s_use_miles; }
 
 bool showRunways() { return s_show_runways; }
 
+bool showSweep() { return s_show_sweep; }
+
 void saveMilesFromPortal(const char* checkbox_value) {
   s_use_miles = portalCheckboxChecked(checkbox_value);
   saveUseMiles();
@@ -103,6 +116,12 @@ void saveRunwaysFromPortal(const char* checkbox_value) {
   s_show_runways = portalCheckboxChecked(checkbox_value);
   saveShowRunways();
   Serial.printf("Runway overlay: %s\n", s_show_runways ? "on" : "off");
+}
+
+void saveSweepFromPortal(const char* checkbox_value) {
+  s_show_sweep = portalCheckboxChecked(checkbox_value);
+  saveShowSweep();
+  Serial.printf("Radar sweep: %s\n", s_show_sweep ? "on" : "off");
 }
 
 void formatRing3Label(char* buf, size_t len, float ring3_km, bool use_miles) {
@@ -122,9 +141,11 @@ void formatCurrentRing3Label(char* buf, size_t len) {
 void unitsReset() {
   s_use_miles = false;
   s_show_runways = true;
+  s_show_sweep = true;
   if (s_prefs.begin(kPrefsNamespace, false)) {
     s_prefs.remove(kPrefsMilesKey);
     s_prefs.remove(kPrefsRunwaysKey);
+    s_prefs.remove(kPrefsSweepKey);
     s_prefs.end();
   }
 }

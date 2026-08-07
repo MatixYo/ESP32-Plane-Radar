@@ -11,7 +11,7 @@
 #include "hardware/display.h"
 #include "hardware/display_font.h"
 
-namespace fonts = lgfx::v1::fonts;
+namespace status_fonts = lgfx::v1::fonts;
 
 namespace {
 
@@ -38,13 +38,13 @@ float s_spinner_angle_deg = -90.0f;
 SpinnerDot s_spinner_dots[kSpinnerDotCount];
 bool s_connecting_text_drawn = false;
 
-constexpr auto& kGfxTitle = fonts::FreeSans18pt7b;
-constexpr auto& kGfxBody = fonts::FreeSans12pt7b;
-constexpr auto& kGfxDetail = fonts::Font2;
-constexpr auto& kPortalGfxTitle = fonts::FreeSansBold18pt7b;
-constexpr auto& kPortalGfxBody = fonts::FreeSansBold12pt7b;
-constexpr auto& kPortalGfxEmphasis = fonts::FreeSansBold18pt7b;
-constexpr auto& kConnectingGfxDetail = fonts::FreeSans9pt7b;
+constexpr auto& kGfxTitle = status_fonts::FreeSans18pt7b;
+constexpr auto& kGfxBody = status_fonts::FreeSans12pt7b;
+constexpr auto& kGfxDetail = status_fonts::Font2;
+constexpr auto& kPortalGfxTitle = status_fonts::FreeSansBold18pt7b;
+constexpr auto& kPortalGfxBody = status_fonts::FreeSansBold12pt7b;
+constexpr auto& kPortalGfxEmphasis = status_fonts::FreeSansBold18pt7b;
+constexpr auto& kConnectingGfxDetail = status_fonts::FreeSans9pt7b;
 
 struct TextLine {
   const char* text;
