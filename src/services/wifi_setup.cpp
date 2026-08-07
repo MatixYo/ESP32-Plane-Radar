@@ -126,6 +126,10 @@ char s_runways_checkbox_attrs[32] = "type=\"checkbox\"";
 WiFiManagerParameter s_param_runways("show_runways", "Show airport runways", "T", 2,
                                      s_runways_checkbox_attrs, WFM_LABEL_AFTER);
 
+char s_sweep_checkbox_attrs[32] = "type=\"checkbox\" checked";
+WiFiManagerParameter s_param_sweep("show_sweep", "Show radar sweep", "T", 2,
+                                   s_sweep_checkbox_attrs, WFM_LABEL_AFTER);
+
 void refreshPortalParamDefaults() {
   char lat_buf[kCoordParamLen + 1];
   char lon_buf[kCoordParamLen + 1];
@@ -150,6 +154,9 @@ void refreshPortalParamDefaults() {
   snprintf(s_runways_checkbox_attrs, sizeof(s_runways_checkbox_attrs),
            "type=\"checkbox\"%s", ui::radar::showRunways() ? " checked" : "");
   s_param_runways.setValue("T", 2);
+  snprintf(s_sweep_checkbox_attrs, sizeof(s_sweep_checkbox_attrs),
+           "type=\"checkbox\"%s", ui::radar::showSweep() ? " checked" : "");
+  s_param_sweep.setValue("T", 2);
 }
 
 void onPortalParamsSaved() {
@@ -162,6 +169,8 @@ void onPortalParamsSaved() {
                                           s_param_clock_24h.getValue());
   ui::radar::saveMilesFromPortal(s_param_miles.getValue());
   ui::radar::saveRunwaysFromPortal(s_param_runways.getValue());
+  ui::radar::saveSweepFromPortal(s_param_sweep.getValue());
+  refreshPortalParamDefaults();
 }
 
 void attachPortalParams(WiFiManager& wm) {
@@ -175,6 +184,7 @@ void attachPortalParams(WiFiManager& wm) {
   wm.addParameter(&s_param_clock_24h);
   wm.addParameter(&s_param_miles);
   wm.addParameter(&s_param_runways);
+  wm.addParameter(&s_param_sweep);
   wm.setSaveParamsCallback(onPortalParamsSaved);
 }
 
@@ -410,6 +420,7 @@ bool openConfigPortal() {
   WiFi.mode(WIFI_OFF);
   delay(50);
   statusScreenPortal();
+  refreshPortalParamDefaults();
   s_wm.setConfigPortalBlocking(false);
   s_wm.startConfigPortal(config::kPortalApName);
   logPortalLifecycle("setup portal requested");
