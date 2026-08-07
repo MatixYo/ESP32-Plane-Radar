@@ -91,6 +91,16 @@ uint16_t s_corner_red = 0;
 uint16_t s_corner_muted = 0;
 #endif
 
+#ifdef BOARD_NM_TV_154
+bool s_has_data_update = false;
+unsigned long s_last_data_update_ms = 0;
+uint16_t s_corner_green = 0;
+uint16_t s_corner_amber = 0;
+uint16_t s_corner_cyan = 0;
+uint16_t s_corner_red = 0;
+uint16_t s_corner_muted = 0;
+#endif
+
 class DrawScope {
  public:
   explicit DrawScope(lgfx::LovyanGFX& gfx) : prev_(s_draw) { s_draw = &gfx; }
