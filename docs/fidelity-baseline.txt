@@ -1,0 +1,65 @@
+Plane Radar — device/native fidelity baseline
+=============================================
+
+The radar's layout is not hand-placed; it is derived at runtime from VLW font
+metrics. initLabelMetrics() binary-searches tft.fontHeight() to pick text
+sizes, measureTagBlockWidth() sums textWidth() calls, and both the east
+scale-label box and the runway ICAO labels size themselves from those results.
+
+So if these numbers match on both destinations, the layout matches. If they
+diverge, everything downstream is misplaced — and it will still *look*
+plausible, which is why this file exists.
+
+Regenerate with: make native   (the metrics block prints at startup)
+On device: enable -DPLANE_RADAR_FRAME_HASH and read the serial log.
+
+
+NATIVE (macOS, LovyanGFX 1.2.26 + Panel_sdl, sdl2-compat 2.32.70)
+-----------------------------------------------------------------
+captured: step 4 of the native-destination port
+
+  smooth(VLW): 1
+  blob bytes:  10766
+
+  cardinal size=0.875003 height=14
+  scale    size=0.687514
+  tag      size=0.812511
+
+  textWidth @scale: N=8  25km=28  15mi=25  KLM1234=44  B738=24  EHAM=27
+  textWidth @tag:   N=9  25km=33  15mi=30  KLM1234=53  B738=29  EHAM=33
+
+
+DEVICE (ESP32-C3 + GC9A01, LovyanGFX 1.2.26)
+---------------------------------------------
+captured: PENDING — step 6 hardware gate
+
+  smooth(VLW): ?
+  blob bytes:  10766     (embedded via board_build.embed_files; same file)
+
+  cardinal size=?  height=?
+  scale    size=?
+  tag      size=?
+
+  textWidth @scale: ?
+  textWidth @tag:   ?
+
+
+Expected result
+---------------
+Exact equality on every line. Both destinations run the same LovyanGFX version
+against the same 10,766-byte data/ui_font.vlw, and glyph rasterization and text
+measurement are panel-independent — they happen in LGFXBase before any pixel
+reaches a panel driver.
+
+A mismatch means one of:
+  - the two envs resolved different LovyanGFX versions (both are exact-pinned
+    in platformio.ini's [common] block precisely to prevent this)
+  - the VLW blob differs (compare "blob bytes" first)
+  - displayFontIsSmooth() is false somewhere, so that side silently fell back
+    to bitmap GFX fonts with entirely different metrics
+
+Note on floating point: the ESP32-C3 is RV32IMC and has no FPU, so sqrtf/sinf/
+cosf/atan2f come from soft-float newlib on device and from macOS libm natively.
+That can move a rounded aircraft coordinate by 1 px. It does NOT affect the
+values in this file — the size search and textWidth are integer comparisons
+over a binary search on float, and both sides do identical arithmetic.

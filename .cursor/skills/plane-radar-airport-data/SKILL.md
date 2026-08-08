@@ -27,8 +27,8 @@ pio run -e supermini
 
 | File | Role |
 |------|------|
-| `include/data/large_airports.h` | Struct definitions, lookup API |
-| `src/data/large_airports_data.cpp` | Embedded runway coordinates (large generated blob) |
+| `include/core/large_airports.h` | Struct definitions, lookup API |
+| `src/core/large_airports_data.cpp` | Embedded runway coordinates (large generated blob) |
 
 **Never hand-edit** `large_airports_data.cpp`. Change the Python script or CSV filters instead.
 
@@ -46,7 +46,7 @@ Users enable/disable overlay via WiFi portal checkbox **"Show airport runways"**
 ## Adding filters or fields
 
 1. Edit `scripts/build_large_airports.py`
-2. Update `include/data/large_airports.h` struct if schema changes
+2. Update `include/core/large_airports.h` struct if schema changes
 3. Regenerate and update `runway_overlay.cpp` if draw logic needs new fields
 
 For CSV column details, see [reference.md](reference.md).

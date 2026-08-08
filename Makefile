@@ -26,7 +26,8 @@ else
   PIO := $(VENV)/bin/pio
 endif
 
-.PHONY: help setup check build upload monitor merge clean rebuild all
+.PHONY: help setup check build upload monitor merge clean rebuild all \
+        native native-build native-clean native-asan check-sdl test
 
 .DEFAULT_GOAL := help
 
@@ -74,6 +75,31 @@ monitor: check ## Open serial monitor (115200 baud)
 
 merge: check ## Build merged web-flash image (release/plane-radar-merged.bin)
 	@"$(ROOT)/scripts/merge-firmware.sh --env "$(PIOENV)"
+
+check-sdl: ## Verify SDL2 headers are installed (needed by the native harness)
+	@test -f /opt/homebrew/include/SDL2/SDL.h -o -f /usr/local/include/SDL2/SDL.h || { \
+		echo "SDL2 headers not found in /opt/homebrew or /usr/local." >&2; \
+		echo "Install with: brew install sdl2" >&2; \
+		exit 1; \
+	}
+	@echo "SDL2 OK"
+
+native-build: check check-sdl ## Compile the native harness (no window)
+	@"$(PIO)" run -e native
+
+native: native-build ## Compile and run the native harness
+	@"$(PIO)" run -e native -t exec
+
+native-asan: check check-sdl ## Run the native harness under ASan/UBSan
+	@PLATFORMIO_BUILD_FLAGS="-fsanitize=address,undefined" \
+		"$(PIO)" run -e native -t exec
+
+test: check ## Run host unit tests (no hardware needed)
+	@"$(PIO)" test -e native_test
+
+native-clean: ## Remove native build artifacts
+	@if test -x "$(PIO)"; then "$(PIO)" run -t clean -e native; \
+	else rm -rf "$(ROOT)/.pio/build/native"; fi
 
 clean: ## Remove PlatformIO build artifacts
 	@if test -x "$(PIO)"; then "$(PIO)" run -t clean -e "$(PIOENV)"; else rm -rf "$(ROOT)/.pio/build/$(PIOENV)"; fi

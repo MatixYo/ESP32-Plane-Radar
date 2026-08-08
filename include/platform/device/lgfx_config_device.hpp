@@ -4,8 +4,9 @@
 #include <LovyanGFX.hpp>
 
 #include "config.h"
+#include "platform/device/pins.h"
 
-/** LovyanGFX device: GC9A01 on SPI. Pin values come from config.h. */
+/** LovyanGFX device: GC9A01 on SPI. Pin values come from platform/device/pins.h. */
 class LGFX : public lgfx::LGFX_Device {
   lgfx::Bus_SPI _bus;
   lgfx::Panel_GC9A01 _panel;

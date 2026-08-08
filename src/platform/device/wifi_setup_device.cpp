@@ -1,4 +1,4 @@
-#include "services/wifi_setup.h"
+#include "platform/wifi_setup.h"
 
 #include <WiFi.h>
 #include <WiFiManager.h>
@@ -14,7 +14,9 @@
 #endif
 
 #include "config.h"
-#include "services/radar_location.h"
+#include "core/portal_params.h"
+#include "platform/device/pins.h"
+#include "core/settings.h"
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
 
@@ -67,53 +69,61 @@ void startLanWebPortal();
 void stopLanWebPortal();
 bool wifiLinkUp();
 
-constexpr int kCoordParamLen = 20;
-constexpr char kCoordInputAttrs[] =
-    " type=\"number\" step=\"0.000001\"";
+/**
+ * Portal fields are defined once in core::portal_params and rendered here as
+ * WiFiManagerParameters, so the captive portal and the native harness's local
+ * portal cannot drift apart.
+ */
+constexpr size_t kMaxPortalFields = 8;
+constexpr int kValueBufLen = 24;
 
-WiFiManagerParameter s_param_lat("radar_lat", "Latitude (deg)", "0",
-                                kCoordParamLen, kCoordInputAttrs);
-WiFiManagerParameter s_param_lon("radar_lon", "Longitude (deg)", "0",
-                                kCoordParamLen, kCoordInputAttrs);
-
-char s_miles_checkbox_attrs[32] = "type=\"checkbox\"";
-WiFiManagerParameter s_param_miles("use_miles", "Display distances in miles", "T", 2,
-                                   s_miles_checkbox_attrs, WFM_LABEL_AFTER);
-
-char s_runways_checkbox_attrs[32] = "type=\"checkbox\"";
-WiFiManagerParameter s_param_runways("show_runways", "Show airport runways", "T", 2,
-                                     s_runways_checkbox_attrs, WFM_LABEL_AFTER);
+WiFiManagerParameter* s_params[kMaxPortalFields] = {nullptr};
+/**
+ * Per-field attribute storage. WiFiManagerParameter keeps `custom` as a pointer
+ * rather than copying it, so each field needs its own buffer that outlives the
+ * portal — and a refresh must rewrite these in place, not reassign them.
+ */
+char s_attrs[kMaxPortalFields][core::portal::kHtmlAttrsMax];
+size_t s_param_count = 0;
 
 void refreshPortalParamDefaults() {
-  char lat_buf[kCoordParamLen + 1];
-  char lon_buf[kCoordParamLen + 1];
-  snprintf(lat_buf, sizeof(lat_buf), "%.6f", services::location::lat());
-  snprintf(lon_buf, sizeof(lon_buf), "%.6f", services::location::lon());
-  s_param_lat.setValue(lat_buf, kCoordParamLen);
-  s_param_lon.setValue(lon_buf, kCoordParamLen);
-  snprintf(s_miles_checkbox_attrs, sizeof(s_miles_checkbox_attrs), "type=\"checkbox\"%s",
-           ui::radar::useMiles() ? " checked" : "");
-  s_param_miles.setValue("T", 2);
-  snprintf(s_runways_checkbox_attrs, sizeof(s_runways_checkbox_attrs),
-           "type=\"checkbox\"%s", ui::radar::showRunways() ? " checked" : "");
-  s_param_runways.setValue("T", 2);
+  const core::portal::Field* fields = core::portal::fields();
+  for (size_t i = 0; i < s_param_count; ++i) {
+    core::portal::htmlAttrs(fields[i], s_attrs[i], sizeof(s_attrs[i]));
+    char value[kValueBufLen];
+    core::portal::currentValue(fields[i], value, sizeof(value));
+    s_params[i]->setValue(value, fields[i].max_len);
+  }
 }
 
 void onPortalParamsSaved() {
-  if (!services::location::saveFromStrings(s_param_lat.getValue(),
-                                           s_param_lon.getValue())) {
-    Serial.println("Invalid lat/lon in portal — keeping previous location");
+  const core::portal::Field* fields = core::portal::fields();
+  for (size_t i = 0; i < s_param_count; ++i) {
+    core::portal::applyValue(fields[i], s_params[i]->getValue());
   }
-  ui::radar::saveMilesFromPortal(s_param_miles.getValue());
-  ui::radar::saveRunwaysFromPortal(s_param_runways.getValue());
+  core::portal::commit();
 }
 
 void attachPortalParams(WiFiManager& wm) {
-  refreshPortalParamDefaults();
-  wm.addParameter(&s_param_lat);
-  wm.addParameter(&s_param_lon);
-  wm.addParameter(&s_param_miles);
-  wm.addParameter(&s_param_runways);
+  const core::portal::Field* fields = core::portal::fields();
+  s_param_count = core::portal::fieldCount();
+  if (s_param_count > kMaxPortalFields) {
+    s_param_count = kMaxPortalFields;
+  }
+
+  for (size_t i = 0; i < s_param_count; ++i) {
+    core::portal::htmlAttrs(fields[i], s_attrs[i], sizeof(s_attrs[i]));
+    char value[kValueBufLen];
+    core::portal::currentValue(fields[i], value, sizeof(value));
+
+    // Allocated once at first portal setup and intentionally never freed:
+    // WiFiManager holds these for the lifetime of the program.
+    s_params[i] = new WiFiManagerParameter(
+        fields[i].id, fields[i].label, value, fields[i].max_len, s_attrs[i],
+        fields[i].label_after ? WFM_LABEL_AFTER : WFM_LABEL_BEFORE);
+    wm.addParameter(s_params[i]);
+  }
+
   wm.setSaveParamsCallback(onPortalParamsSaved);
 }
 
@@ -189,7 +199,7 @@ void eraseWifiCredentials() {
 void resetWifiCredentials() {
   markForceConfigPortal();
   eraseWifiCredentials();
-  services::location::clear();
+  core::settings::clearLocation();
   ui::radar::unitsReset();
   Serial.println("WiFi credentials, location, and units cleared");
 }
@@ -348,6 +358,8 @@ bool openConfigPortal() {
 }
 
 }  // namespace
+
+bool wifiIsConnected() { return WiFi.status() == WL_CONNECTED; }
 
 bool wifiShowsSetupScreenOnBoot() {
   if (s_force_config_portal) {

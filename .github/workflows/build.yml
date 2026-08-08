@@ -53,3 +53,43 @@ jobs:
             .pio/build/supermini/firmware.bin
             .pio/build/supermini/bootloader.bin
             .pio/build/supermini/partitions.bin
+
+  # Compile-only build of the native dev harness. This is the mechanism that
+  # enforces the portability invariant: any Arduino/ESP-IDF header that leaks
+  # into shared code breaks this job. Compile only, never `-t exec` — the
+  # harness opens a window and there is no display on a runner.
+  native:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install SDL2 and libcurl
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libcurl4-openssl-dev
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+            .pio/libdeps
+          key: ${{ runner.os }}-pio-native-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-native-
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build native harness
+        run: pio run -e native
+
+      - name: Run host unit tests
+        run: pio test -e native_test

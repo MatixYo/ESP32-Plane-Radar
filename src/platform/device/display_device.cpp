@@ -1,6 +1,8 @@
-#include "hardware/display.h"
+/** Device display bring-up: GC9A01 over SPI. */
 
-#include "hardware/display_font.h"
+#include "ui/display.h"
+
+#include "ui/display_font.h"
 
 LGFX tft;
 

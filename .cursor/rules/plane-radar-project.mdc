@@ -12,10 +12,10 @@ Firmware for **ESP32-C3 Super Mini** + **GC9A01** round display (240×240). Live
 | Layer | Path | Role |
 |-------|------|------|
 | Config | `include/config.h` | Pins, timings, defaults, portal names |
-| Hardware | `include/hardware/`, `src/hardware/` | LovyanGFX display, embedded VLW font |
-| Services | `include/services/`, `src/services/` | WiFi, location, ADS-B fetch |
+| Hardware | `ui/`, `src/platform/` | LovyanGFX display, embedded VLW font |
+| Services | `include/platform/`, `src/platform/` | WiFi, location, ADS-B fetch |
 | UI | `include/ui/`, `src/ui/` | Radar grid, aircraft, runways, status screens |
-| Data | `include/data/`, `src/data/` | Generated airport/runway dataset |
+| Data | `include/core/`, `src/core/` | Generated airport/runway dataset |
 | Entry | `src/main.cpp` | Boot flow and main loop |
 
 ## Namespaces
@@ -36,4 +36,4 @@ Firmware for **ESP32-C3 Super Mini** + **GC9A01** round display (240×240). Live
 
 - Minimize scope; match existing C++17 Arduino style and file layout
 - Put tunables in `config.h`, layout constants in `ui/radar_theme.h`, range presets in `ui/radar_range.h`
-- Do not hand-edit generated `src/data/large_airports_data.cpp`
+- Do not hand-edit generated `src/core/large_airports_data.cpp`

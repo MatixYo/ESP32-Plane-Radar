@@ -15,8 +15,8 @@ description: Work with the adsb.fi ADS-B client, aircraft parsing, fetch interva
 
 | File | Role |
 |------|------|
-| `include/services/adsb_client.h` | `Aircraft` struct, `kMaxAircraft = 64` |
-| `src/services/adsb_client.cpp` | HTTP fetch, JSON parse, aircraft buffer |
+| `include/core/adsb.h` | `Aircraft` struct, `kMaxAircraft = 64` |
+| `src/core/adsb.cpp` | HTTP fetch, JSON parse, aircraft buffer |
 | `src/main.cpp` | Poll interval, calls `fetchAndDrawAircraft()` |
 | `include/ui/radar_range.h` | `fetchRadiusKm()` for query radius |
 

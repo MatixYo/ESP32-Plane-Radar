@@ -1,23 +1,15 @@
-#include "hardware/display_font.h"
+#include "ui/display_font.h"
 
-#include "hardware/display.h"
-
-extern "C" {
-extern const uint8_t _binary_data_ui_font_vlw_start[] asm(
-    "_binary_data_ui_font_vlw_start");
-extern const uint8_t _binary_data_ui_font_vlw_end[] asm("_binary_data_ui_font_vlw_end");
-}
+#include "core/platform.h"
+#include "ui/display.h"
 
 namespace {
 
 bool s_vlw_loaded = false;
 
-const uint8_t* vlwData() { return _binary_data_ui_font_vlw_start; }
+const uint8_t* vlwData() { return core::platform::fontBlobData(); }
 
-size_t vlwDataLen() {
-  return static_cast<size_t>(_binary_data_ui_font_vlw_end -
-                               _binary_data_ui_font_vlw_start);
-}
+size_t vlwDataLen() { return core::platform::fontBlobLen(); }
 
 bool vlwActiveOn(const lgfx::LGFXBase& gfx) {
   const lgfx::IFont* font = gfx.getFont();
@@ -30,7 +22,7 @@ bool displayFontInit() {
   s_vlw_loaded = vlwDataLen() > 0 &&
                  tft.loadFont(vlwData(), lgfx::IFont::font_type_t::ft_vlw);
   if (!s_vlw_loaded) {
-    Serial.println("Smooth font load failed — using bitmap fallback");
+    core::platform::logf("Smooth font load failed — using bitmap fallback\n");
   }
   return s_vlw_loaded;
 }

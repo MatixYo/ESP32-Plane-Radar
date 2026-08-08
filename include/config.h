@@ -1,8 +1,14 @@
 #pragma once
 
-#include <cstdint>
+/**
+ * Portable configuration shared by every destination.
+ *
+ * Must stay free of Arduino / ESP-IDF headers: the native destination compiles
+ * this file too. Device-only pin and bus settings live in
+ * include/platform/device/pins.h.
+ */
 
-#include <driver/gpio.h>
+#include <cstdint>
 
 namespace config {
 
@@ -23,35 +29,31 @@ constexpr unsigned long kWifiDownGraceMs = 4000;
 /** Minimum interval between background reconnect tries. */
 constexpr unsigned long kWifiReconnectIntervalMs = 15000;
 
-// --- BOOT button (ESP32-C3 Super Mini, active LOW) ---
-constexpr gpio_num_t kBootPin = GPIO_NUM_9;
+// --- BOOT button timing (pin lives in platform/device/pins.h) ---
 constexpr unsigned long kBootResetHoldMs = 3000UL;
 /** Ignore BOOT taps shorter than this (debounce). */
 constexpr unsigned long kBootTapMinMs = 40UL;
 
-// --- Display: GC9A01 1.28" round 240×240 (SPI) ---
-constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_0;
-constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_1;
-constexpr gpio_num_t kDisplayPinDc = GPIO_NUM_10;
-constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_3;  // display SDA
-constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_4;  // display SCL
-
+// --- Display geometry (pins and bus settings in platform/device/pins.h) ---
 constexpr int kDisplayWidth = 240;
 constexpr int kDisplayHeight = 240;
 
-constexpr uint32_t kDisplaySpiWriteHz = 40000000;
-// GC9A01 modules often need invert + BGR for correct black/green output
-constexpr bool kDisplayInvert = true;
+/**
+ * GC9A01 panel colour order.
+ *
+ * TODO(step 1): pending the on-hardware colour check. This is currently read by
+ * both the LGFX device config and ui/radar_display.cpp's initPalette(), which
+ * software-swaps R/B for the aircraft colour only. Once the panel's real colour
+ * order is confirmed the swap is deleted and this constant moves to pins.h.
+ */
 constexpr bool kDisplayRgbOrder = true;
 
 // --- Radar center defaults (overridden via WiFi setup portal) ---
-constexpr double kDefaultRadarLat = 52.3676;
-constexpr double kDefaultRadarLon = 4.9041;
+constexpr double kDefaultRadarLat = 47.0753;
+constexpr double kDefaultRadarLon = 15.4062;
 
 /** Poll adsb.fi (API public limit: 1 req/s). */
-constexpr unsigned long kAdsbFetchIntervalMs = 3000;
-/** Legacy scale unused — fetch uses radar::fetchRadiusKm() to screen edge. */
-constexpr float kAdsbFetchRadiusScale = 1.0f;
+constexpr unsigned long kAdsbFetchIntervalMs = 10000;
 /** false = hide aircraft with alt_baro "ground"; true = show them too. */
 constexpr bool kAdsbShowGroundAircraft = false;
 

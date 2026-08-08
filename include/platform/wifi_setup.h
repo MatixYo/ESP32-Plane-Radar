@@ -1,5 +1,15 @@
 #pragma once
 
+/**
+ * Station association state, as main.cpp's loop uses it.
+ *
+ * Deliberately equivalent to WiFi.status() == WL_CONNECTED and nothing more.
+ * The stricter internal wifiLinkUp() additionally requires a non-zero local IP;
+ * substituting it here would change the WiFi-lost / grace / reconnect timing in
+ * loop(), so the two must stay distinct.
+ */
+bool wifiIsConnected();
+
 /** True when the next boot should show the setup screen first (after credential reset). */
 bool wifiShowsSetupScreenOnBoot();
 void wifiResetCredentialsAndReboot();

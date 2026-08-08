@@ -46,6 +46,19 @@ constexpr float kAircraftTrackLengthScale = 1.5f / 5.0f;
 /** drawWideLine half-width for speed vectors (~2 px total). */
 constexpr float kAircraftTrackLineHalfWidth = 1.0f;
 
+/**
+ * Runway length exaggeration.
+ *
+ * Real runways are 2-4 km. At a 20 NM ring that is only a couple of pixels, so
+ * they read as dots rather than strips and their orientation — the useful part
+ * — is invisible. The drawn line is stretched about the runway's midpoint, so
+ * position and bearing stay true while the length becomes legible.
+ *
+ * Deliberately cosmetic: this overlay is an orientation aid, not a chart. At
+ * this factor a 3 km runway draws as if it were 15 km.
+ */
+constexpr float kRunwayLengthScale = 5.0f;
+
 constexpr float kRunwayLineWidthPx = 2.0f;
 constexpr float kRunwayLineHalfWidth = kRunwayLineWidthPx * 0.5f;
 constexpr int kRunwayLabelHeightPx = kCardinalLabelHeightPx;
@@ -61,6 +74,19 @@ constexpr int kBeyondRingDotRadiusPx = 4;
 constexpr int kBeyondRingScreenMarginPx = 2;
 /** Target cap height (px) for aircraft tags (bold, slightly above scale label). */
 constexpr int kAircraftTagLabelHeightPx = 13;
+
+/**
+ * Above this many tagged aircraft, tags collapse to the callsign alone.
+ *
+ * A full tag is three lines (callsign / type / altitude). On a 240 px disc that
+ * is fine for a handful of aircraft and unreadable mush once the sky is busy —
+ * and the callsign is the line you actually read. Dropping to one line trades
+ * detail for legibility exactly when legibility is what is scarce.
+ *
+ * Counts only aircraft drawn inside the outer ring. Traffic beyond it renders
+ * as a bare rim dot with no tag, so it cannot contribute to tag clutter.
+ */
+constexpr int kTagCompactAboveCount = 4;
 
 /** RGB565 palette targets (applied in initPalette). */
 constexpr uint8_t kBgR = 4;

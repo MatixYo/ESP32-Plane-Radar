@@ -1,18 +1,22 @@
 /**
  * Plane Radar — WiFi setup, then radar UI on the round GC9A01 display.
+ *
+ * Shared by both destinations. Everything platform-specific goes through
+ * core::platform or the wifi_setup.h seam, so this file compiles unchanged for
+ * the device and for the native harness.
  */
 
-#include <Arduino.h>
-#include <WiFi.h>
-
 #include "config.h"
-#include "hardware/display.h"
-#include "services/adsb_client.h"
-#include "services/radar_location.h"
-#include "services/wifi_setup.h"
+#include "core/platform.h"
+#include "ui/display.h"
+#include "core/adsb.h"
+#include "core/settings.h"
+#include "platform/wifi_setup.h"
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
+
+namespace pf = core::platform;
 
 namespace {
 
@@ -22,7 +26,7 @@ unsigned long g_last_reconnect_ms = 0;
 unsigned long g_last_adsb_fetch_ms = 0;
 
 void showRadarIfConnected() {
-  if (WiFi.status() != WL_CONNECTED) {
+  if (!wifiIsConnected()) {
     g_radar_visible = false;
     return;
   }
@@ -34,10 +38,10 @@ void onRangeTap() {
   ui::radar::rangeNext();
   char range_label[12];
   ui::radar::formatCurrentRing3Label(range_label, sizeof(range_label));
-  Serial.printf("Range: %s (outer ~%.0f km)\n", range_label,
-                ui::radar::rangeCurrent().outer_km);
+  pf::logf("Range: %s (outer ~%.0f km)\n", range_label,
+           static_cast<double>(ui::radar::rangeCurrent().outer_km));
 
-  if (g_radar_visible && WiFi.status() == WL_CONNECTED) {
+  if (g_radar_visible && wifiIsConnected()) {
     ui::radarDisplayDraw();
   }
 }
@@ -51,8 +55,8 @@ void handleBootButton() {
 
 void fetchAndDrawAircraft() {
   const float fetch_km = ui::radar::fetchRadiusKm();
-  if (!services::adsb::fetchUpdate(services::location::lat(),
-                                   services::location::lon(), fetch_km)) {
+  if (!core::adsb::fetchUpdate(core::settings::lat(),
+                                   core::settings::lon(), fetch_km)) {
     handleBootButton();
     return;
   }
@@ -63,19 +67,17 @@ void fetchAndDrawAircraft() {
 }  // namespace
 
 void setup() {
-  Serial.begin(115200);
-  delay(500);
-  Serial.println();
-  Serial.println("Plane Radar");
+  pf::logInit();
+  pf::logf("\nPlane Radar\n");
 
   bootButtonInit();
   displayInit();
   if (wifiShowsSetupScreenOnBoot()) {
     statusScreenPortal();
   }
-  services::location::init();
+  core::settings::init();
   ui::radar::rangeInit();
-  services::adsb::setPollFn(wifiLoop);
+  core::adsb::setPollFn(wifiLoop);
 
   if (wifiSetupConnect()) {
     showRadarIfConnected();
@@ -86,20 +88,20 @@ void loop() {
   handleBootButton();
   wifiLoop();
 
-  if (WiFi.status() != WL_CONNECTED) {
+  if (!wifiIsConnected()) {
     if (g_radar_visible) {
-      Serial.println("WiFi lost — will reconnect");
+      pf::logf("WiFi lost — will reconnect\n");
       g_radar_visible = false;
     }
 
     if (g_wifi_down_since == 0) {
-      g_wifi_down_since = millis();
+      g_wifi_down_since = pf::nowMs();
     }
 
-    const unsigned long down_ms = millis() - g_wifi_down_since;
+    const unsigned long down_ms = pf::nowMs() - g_wifi_down_since;
     if (down_ms >= config::kWifiDownGraceMs &&
-        millis() - g_last_reconnect_ms >= config::kWifiReconnectIntervalMs) {
-      g_last_reconnect_ms = millis();
+        pf::nowMs() - g_last_reconnect_ms >= config::kWifiReconnectIntervalMs) {
+      g_last_reconnect_ms = pf::nowMs();
       if (wifiReconnect()) {
         g_wifi_down_since = 0;
         showRadarIfConnected();
@@ -109,11 +111,12 @@ void loop() {
     g_wifi_down_since = 0;
     if (!g_radar_visible) {
       showRadarIfConnected();
-    } else if (millis() - g_last_adsb_fetch_ms >= config::kAdsbFetchIntervalMs) {
-      g_last_adsb_fetch_ms = millis();
+    } else if (pf::nowMs() - g_last_adsb_fetch_ms >=
+               config::kAdsbFetchIntervalMs) {
+      g_last_adsb_fetch_ms = pf::nowMs();
       fetchAndDrawAircraft();
     }
   }
 
-  delay(10);
+  pf::sleepMs(10);
 }

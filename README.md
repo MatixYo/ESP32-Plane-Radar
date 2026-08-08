@@ -11,13 +11,13 @@ Firmware for an **ESP32-C3 Super Mini** and a **1.28″ round GC9A01** display (
 1. **Wi‑Fi setup** (if needed) — captive portal on AP **`PlaneRadar-Setup`**
 2. **Radar** — live aircraft from [adsb.fi](https://opendata.adsb.fi/) on a sonar-style grid
 
-After Wi‑Fi is saved, the device reconnects automatically; the radar runs in the main loop with periodic ADS-B updates (~5 s).
+After Wi‑Fi is saved, the device reconnects automatically; the radar runs in the main loop with periodic ADS-B updates (~3 s).
 
 ## Controls (BOOT, GPIO 9, active LOW)
 
 | Action | Effect |
 |--------|--------|
-| **Short tap** | Cycle range preset (5 → 10 → 15 → 25 km); saved to flash |
+| **Short tap** | Cycle range preset (10 → 20 → 40 → 80 NM); saved to flash |
 | **Hold 3 s** | Clear Wi‑Fi, location, and units; reboot into setup portal |
 
 During setup you can also hold BOOT at power-on to force a credential reset (same as the long press).
@@ -42,10 +42,56 @@ The same portal runs on the setup AP and on the device’s LAN IP while connecte
 | Field | Purpose |
 |-------|---------|
 | **Latitude / Longitude** | Radar center and ADS-B query position (defaults in `config.h` until set) |
-| **Display distances in miles** | Ring scale label in **mi** instead of **km** (e.g. `6mi` vs `10km`) |
+| **Display distances in km** | Ring scale label in **km** instead of the default **NM** (e.g. `74km` vs `40NM`) |
 | **Show airport runways** | Major-airport runway overlay on the radar (off to hide) |
 
 After a reset, the device reboots and shows the setup screen immediately (no “Connecting” loop on stale credentials).
+
+## Native dev harness
+
+The same firmware sources also build as a **native macOS binary**, so radar layout and logic
+can be iterated without flashing a board:
+
+```bash
+make native        # build and run (720x720 window, 240x240 logical at 3x)
+make native-build  # compile only
+make test          # host unit tests
+```
+
+This is **not an emulator** — there is no virtual CPU and no virtual SPI bus. It is your own
+C++ compiled by clang, with LovyanGFX's `Panel_sdl` backend writing pixels into an SDL window
+instead of `Panel_GC9A01` writing them over SPI. All business logic and all drawing code are
+shared with the firmware.
+
+Requires `brew install sdl2` (libcurl ships with macOS).
+
+| | Device | Native |
+|---|---|---|
+| Settings | NVS | `~/.plane-radar/settings.json` (`$PLANE_RADAR_SETTINGS` overrides) |
+| Config portal | captive portal on the AP | `http://127.0.0.1:8080` |
+| BOOT button | GPIO 9 | **SPACE** key (tap and 3 s hold both work) |
+| Aircraft data | live adsb.fi | live adsb.fi |
+
+Extra shortcuts from LovyanGFX: **Ctrl+1…6** rescales the window, **Ctrl+L/R** rotates it.
+
+### Fidelity
+
+The radar's layout is derived at runtime from VLW font metrics, so the harness is only useful
+if those metrics match the device exactly. `docs/fidelity-baseline.txt` records them for both
+destinations; regenerate with `PLATFORMIO_BUILD_FLAGS="-DPLANE_RADAR_FRAME_HASH" pio run -e native -t exec`.
+
+Everything composited into the `LGFX_Sprite` frame buffer — grid, rings, labels, aircraft,
+runway overlay — is pixel-exact across destinations. The three status screens are layout-exact
+but blend-approximate: they draw anti-aliased circles straight to the panel, and the device
+cannot read back pixels (`pin_miso = -1`), so it blends against assumed black.
+**New UI work should draw into the sprite; direct-to-panel anti-aliasing is a defect.**
+
+Note the ESP32-C3 has no FPU, so `sinf`/`cosf`/`atan2f` come from soft-float newlib on device
+and macOS libm natively. Trig-derived aircraft positions can differ by 1 px; text metrics and
+integer layout are exact.
+
+`~/.plane-radar/settings.json` stores the Wi-Fi SSID in plaintext. The harness is a
+development tool, not a product.
 
 ## Radar display
 
@@ -59,14 +105,14 @@ Layout and colors: `include/ui/radar_theme.h`.
 
 ### Range presets
 
-| Ring 3 label | Outer radius (aircraft scale) |
-|------------|-------------------------------|
-| 5 km / 3 mi | ~6.7 km |
-| 10 km / 6 mi | ~13.3 km (default) |
-| 15 km / 9 mi | ~20 km |
-| 25 km / 16 mi | ~33.3 km |
+| Ring 3 label | Outer radius (aircraft scale) | ADS-B fetch radius |
+|------------|-------------------------------|--------------------|
+| 10 NM / 19 km | ~13 NM (25 km) | ~15 NM (27 km) |
+| 20 NM / 37 km (default) | ~27 NM (49 km) | ~29 NM (54 km) |
+| 40 NM / 74 km | ~53 NM (99 km) | ~59 NM (109 km) |
+| 80 NM / 148 km | ~107 NM (198 km) | ~118 NM (218 km) |
 
-Preset and miles/km choice persist across reboot (`planeradar` NVS namespace).
+Preset and NM/km choice persist across reboot (`planeradar` NVS namespace).
 
 ### Runways
 
@@ -86,7 +132,7 @@ As range decreases (or aircraft approach), targets move inward; beyond-ring dots
 
 - Source: `https://opendata.adsb.fi/api/v3/`
 - Fetch radius: `ui::radar::fetchRadiusKm()` — scales with the active preset to roughly the screen edge (so rim dots have data)
-- Poll interval: `kAdsbFetchIntervalMs` (5 s) in `config.h`
+- Poll interval: `kAdsbFetchIntervalMs` (3 s) in `config.h`
 - Ground aircraft hidden by default (`kAdsbShowGroundAircraft`)
 
 ## Configuration
@@ -102,40 +148,40 @@ Edit **`include/config.h`** for hardware and behavior:
 | Default location | `kDefaultRadarLat`, `kDefaultRadarLon` (until portal overrides) |
 | ADS-B | `kAdsbFetchIntervalMs`, `kAdsbShowGroundAircraft` |
 
-Range presets: `include/ui/radar_range.h` (`kRangePresets`).
+Range presets: `include/core/settings.h` (`kRangePresets`).
 
 ## Project layout
 
 ```
 include/
-  config.h
-  hardware/
-    lgfx_config.hpp
-    display.h
-    display_font.h
-  data/
+  config.h                 — portable settings shared by both destinations
+  core/                    — portable logic: no Arduino, no LovyanGFX
+    platform.h             — the seam: clock, log, reboot, storage, HTTP, font
+    settings.h             — location, range preset, units, runway toggle
+    geo.h                  — lat/lon to screen projection
+    adsb.h, aircraft.h     — ADS-B fetch and decode
+    portal_params.h        — config-portal field table (one per destination)
     large_airports.h
-  ui/
-    radar_theme.h
-    radar_range.h
-    radar_display.h
-    runway_overlay.h
-    status_screens.h
-  services/
-    wifi_setup.h
-    radar_location.h
-    adsb_client.h
+  ui/                      — LovyanGFX drawing, shared by both destinations
+    display.h, display_font.h, radar_theme.h, radar_range.h
+    radar_display.h, runway_overlay.h, status_screens.h
+  platform/
+    wifi_setup.h           — radio + BOOT button seam
+    device/                — pins.h, lgfx_config_device.hpp
+    native/                — lgfx_config_native.hpp
 data/
   ui_font.vlw              — embedded smooth UI font (Noto Sans Bold)
 scripts/
   build_large_airports.py
 src/
-  main.cpp
-  data/
-    large_airports_data.cpp
-  hardware/
-  ui/
-  services/
+  main.cpp                 — setup()/loop(), shared verbatim
+  core/                    — settings, geo, adsb, portal_params, airport data
+  ui/                      — radar_display, runway_overlay, status_screens, display_font
+  platform/
+    device/                — NVS, HTTPClient, WiFiManager, GC9A01, embedded font
+    native/                — JSON settings, libcurl, SDL panel, keyboard BOOT,
+                             simulated radio, localhost config portal
+test/                      — host unit tests (pio test -e native_test)
 ```
 
 ## Wiring (GC9A01 ↔ ESP32-C3 Super Mini)
