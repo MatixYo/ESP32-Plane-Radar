@@ -5,7 +5,6 @@
 
 #include <ArduinoJson.h>
 
-#include <algorithm>
 #include <cstring>
 
 #include "config.h"
@@ -29,41 +28,6 @@ void pollNetwork() {
     s_poll_fn();
   }
 }
-
-class PollingStreamReader {
- public:
-  explicit PollingStreamReader(Stream& stream) : stream_(stream) {}
-
-  int read() {
-    char value = 0;
-    const bool received = stream_.readBytes(&value, 1) == 1;
-    pollOccasionally(1);
-    return received ? static_cast<unsigned char>(value) : -1;
-  }
-
-  size_t readBytes(char* buffer, size_t length) {
-    // Keep reads short so display animation is serviced while JSON arrives.
-    constexpr size_t kChunkSize = 256;
-    const size_t chunk = std::min(length, kChunkSize);
-    const size_t count = stream_.readBytes(buffer, chunk);
-    pollNetwork();
-    bytes_until_poll_ = kChunkSize;
-    return count;
-  }
-
- private:
-  void pollOccasionally(size_t count) {
-    if (count >= bytes_until_poll_) {
-      pollNetwork();
-      bytes_until_poll_ = 256;
-    } else {
-      bytes_until_poll_ -= count;
-    }
-  }
-
-  Stream& stream_;
-  size_t bytes_until_poll_ = 256;
-};
 
 int performGetWithPoll(HTTPClient& http) {
   http.setConnectTimeout(kConnectAttemptMs);
@@ -255,9 +219,8 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   JsonDocument filter;
   buildAircraftJsonFilter(filter);
   JsonDocument doc;
-  PollingStreamReader reader(http.getStream());
-  const DeserializationError err =
-      deserializeJson(doc, reader, DeserializationOption::Filter(filter));
+  const DeserializationError err = deserializeJson(
+      doc, http.getStream(), DeserializationOption::Filter(filter));
   http.end();
   if (err) {
     Serial.printf("adsb: JSON parse error: %s\n", err.c_str());

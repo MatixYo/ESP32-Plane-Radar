@@ -23,6 +23,28 @@ unsigned long g_last_adsb_fetch_ms = 0;
 volatile bool g_adsb_fetch_requested = false;
 volatile bool g_adsb_fetch_running = false;
 volatile bool g_adsb_refresh_ready = false;
+TaskHandle_t g_adsb_fetch_task = nullptr;
+
+void fetchAircraftTask(void*);
+
+void syncAdsbFetchMode() {
+  if (ui::radar::sweepEnabled()) {
+    if (g_adsb_fetch_task == nullptr &&
+        xTaskCreate(fetchAircraftTask, "adsb-fetch", 8192, nullptr, 0,
+                    &g_adsb_fetch_task) != pdPASS) {
+      Serial.println("adsb: failed to create fetch task");
+    }
+    return;
+  }
+
+  if (g_adsb_fetch_task == nullptr || g_adsb_fetch_running ||
+      g_adsb_fetch_requested) {
+    return;
+  }
+  vTaskDelete(g_adsb_fetch_task);
+  g_adsb_fetch_task = nullptr;
+  Serial.println("ADS-B background task stopped (sweep off)");
+}
 
 void showRadarIfConnected() {
   if (WiFi.status() != WL_CONNECTED) {
@@ -70,6 +92,24 @@ void fetchAircraftTask(void*) {
   }
 }
 
+void pollDuringAdsbFetch() {
+  // The proven pre-sweep path keeps the portal responsive while synchronous
+  // networking is in progress. The background sweep path must not call the
+  // web server concurrently with the main loop.
+  if (!ui::radar::sweepEnabled() && !g_adsb_fetch_running) {
+    wifiLoop();
+  }
+}
+
+void fetchAndDrawAircraft() {
+  const float fetch_km = ui::radar::fetchRadiusKm();
+  if (services::adsb::fetchUpdate(services::location::lat(),
+                                  services::location::lon(), fetch_km)) {
+    ui::radarDisplayRefreshAircraft();
+  }
+  handleBootButton();
+}
+
 }  // namespace
 
 void setup() {
@@ -85,11 +125,8 @@ void setup() {
   }
   services::location::init();
   ui::radar::rangeInit();
-  services::adsb::setPollFn(nullptr);
-  if (xTaskCreate(fetchAircraftTask, "adsb-fetch", 8192, nullptr, 1,
-                  nullptr) != pdPASS) {
-    Serial.println("adsb: failed to create fetch task");
-  }
+  services::adsb::setPollFn(pollDuringAdsbFetch);
+  syncAdsbFetchMode();
 
   if (wifiSetupConnect()) {
     showRadarIfConnected();
@@ -99,6 +136,7 @@ void setup() {
 void loop() {
   handleBootButton();
   wifiLoop();
+  syncAdsbFetchMode();
 
   if (WiFi.status() != WL_CONNECTED) {
     if (g_radar_visible) {
@@ -126,7 +164,11 @@ void loop() {
     } else if (!g_adsb_fetch_running && !g_adsb_fetch_requested &&
                millis() - g_last_adsb_fetch_ms >= config::kAdsbFetchIntervalMs) {
       g_last_adsb_fetch_ms = millis();
-      g_adsb_fetch_requested = true;
+      if (ui::radar::sweepEnabled()) {
+        g_adsb_fetch_requested = true;
+      } else {
+        fetchAndDrawAircraft();
+      }
     }
     if (g_adsb_refresh_ready) {
       g_adsb_refresh_ready = false;

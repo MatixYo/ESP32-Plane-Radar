@@ -764,18 +764,20 @@ void radarDisplayDraw() {
   if (ensureFrameSprite()) {
     renderBaseFrame();
     s_frame.pushSprite(0, 0);
-    {
+    if (radar::sweepEnabled()) {
       const DrawScope scope(tft);
       drawSweep(sweep_deg);
     }
-    s_previous_sweep_valid = true;
+    s_previous_sweep_valid = radar::sweepEnabled();
     return;
   }
 
   // Fallback when the sprite can't be allocated: draw straight to the panel.
   const DrawScope scope(tft);
   drawStaticGrid(tft);
-  drawSweep(sweep_deg);
+  if (radar::sweepEnabled()) {
+    drawSweep(sweep_deg);
+  }
   drawAircraft();
   tft.setTextDatum(textdatum_t::top_left);
 }
@@ -794,11 +796,11 @@ void radarDisplayRefreshAircraft() {
   if (ensureFrameSprite()) {
     renderBaseFrame();
     s_frame.pushSprite(0, 0);
-    {
+    if (radar::sweepEnabled()) {
       const DrawScope scope(tft);
       drawSweep(sweep_deg);
     }
-    s_previous_sweep_valid = true;
+    s_previous_sweep_valid = radar::sweepEnabled();
     return;
   }
 
@@ -807,11 +809,20 @@ void radarDisplayRefreshAircraft() {
 
 void radarDisplayAnimate() {
   const unsigned long now = millis();
+  if (!radar::sweepEnabled()) {
+    if (s_previous_sweep_valid && ensureFrameSprite()) {
+      restoreSweepLine(s_previous_sweep_deg);
+    }
+    s_previous_sweep_valid = false;
+    return;
+  }
   if (now - s_last_sweep_frame_ms < radar::kSweepFrameIntervalMs) {
     return;
   }
   s_last_sweep_frame_ms = now;
-  float sweep_deg = s_previous_sweep_deg + radar::kSweepStepDegrees;
+  float sweep_deg = s_previous_sweep_valid
+                        ? s_previous_sweep_deg + radar::kSweepStepDegrees
+                        : sweepHeadingDeg(now);
   if (sweep_deg >= 360.0f) {
     sweep_deg -= 360.0f;
   }
