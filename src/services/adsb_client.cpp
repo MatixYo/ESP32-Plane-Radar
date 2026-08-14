@@ -46,46 +46,25 @@ int performGetWithPoll(HTTPClient& http) {
   return HTTPC_ERROR_READ_TIMEOUT;
 }
 
-bool readResponseBodyWithPoll(HTTPClient& http, String& payload) {
-  WiFiClient* stream = http.getStreamPtr();
-  if (stream == nullptr) {
-    return false;
-  }
-
-  const int content_length = http.getSize();
-  if (content_length > 0) {
-    payload.reserve(static_cast<unsigned>(content_length + 1));
-  }
-
-  uint8_t buffer[512];
-  const unsigned long deadline = millis() + kRequestTimeoutMs;
-  while (millis() < deadline) {
-    pollNetwork();
-    const int available = stream->available();
-    if (available > 0) {
-      const int to_read =
-          available > static_cast<int>(sizeof(buffer)) ? static_cast<int>(sizeof(buffer))
-                                                       : available;
-      const int read_bytes = stream->readBytes(buffer, to_read);
-      if (read_bytes > 0) {
-        payload.concat(reinterpret_cast<const char*>(buffer),
-                       static_cast<unsigned>(read_bytes));
-      }
-    }
-    if (content_length > 0 &&
-        static_cast<int>(payload.length()) >= content_length) {
-      break;
-    }
-    if (!http.connected() && stream->available() <= 0) {
-      break;
-    }
-    delay(1);
-  }
-
-  return payload.length() > 0;
-}
-
 float kmToNauticalMiles(float km) { return km / kKmPerNm; }
+
+void buildAircraftJsonFilter(JsonDocument& filter) {
+  JsonObject plane = filter["ac"][0].to<JsonObject>();
+  plane["lat"] = true;
+  plane["lon"] = true;
+  plane["true_heading"] = true;
+  plane["mag_heading"] = true;
+  plane["track"] = true;
+  plane["dir"] = true;
+  plane["gs"] = true;
+  plane["tas"] = true;
+  plane["ias"] = true;
+  plane["alt_baro"] = true;
+  plane["alt_geom"] = true;
+  plane["flight"] = true;
+  plane["hex"] = true;
+  plane["t"] = true;
+}
 
 bool readJsonFloat(const JsonObject& obj, const char* key, float* out) {
   if (obj[key].is<float>() || obj[key].is<double>() || obj[key].is<int>()) {
@@ -232,16 +211,14 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     return false;
   }
 
-  String payload;
-  if (!readResponseBodyWithPoll(http, payload)) {
-    Serial.println("adsb: empty response");
-    http.end();
-    return false;
-  }
-  http.end();
-
+  // Parse directly from the network stream so large search radii do not need
+  // one contiguous response buffer. The filter retains only displayed fields.
+  JsonDocument filter;
+  buildAircraftJsonFilter(filter);
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, payload);
+  const DeserializationError err = deserializeJson(
+      doc, http.getStream(), DeserializationOption::Filter(filter));
+  http.end();
   if (err) {
     Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
     return false;

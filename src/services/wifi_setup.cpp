@@ -68,13 +68,48 @@ void stopLanWebPortal();
 bool wifiLinkUp();
 
 constexpr int kCoordParamLen = 20;
+constexpr int kRangeParamLen = 3;
+constexpr int kHeadingParamLen = 3;
 constexpr char kCoordInputAttrs[] =
     " type=\"number\" step=\"0.000001\"";
+constexpr char kHeadingInputAttrs[] =
+    " type=\"number\" min=\"0\" max=\"359\" step=\"1\" inputmode=\"numeric\"";
+
+constexpr char kRangeSelectScript[] = R"HTML(
+<script>
+document.addEventListener('DOMContentLoaded',function(){
+  function makeSelect(name,options){
+    var input=document.querySelector('input[name="'+name+'"]');
+    if(!input)return;
+    var select=document.createElement('select');
+    select.name=input.name;
+    select.id=input.id;
+    select.style.cssText='width:100%;padding:8px;margin:8px 0 16px';
+    options.forEach(function(item){
+      var option=document.createElement('option');
+      option.value=item[0];
+      option.textContent=item[1];
+      option.selected=item[0]===input.value;
+      select.appendChild(option);
+    });
+    input.replaceWith(select);
+  }
+  makeSelect('radar_range',[
+    ['1','1 km'],['5','5 km'],['10','10 km'],['15','15 km'],['25','25 km']
+  ]);
+});
+</script>
+)HTML";
 
 WiFiManagerParameter s_param_lat("radar_lat", "Latitude (deg)", "0",
                                 kCoordParamLen, kCoordInputAttrs);
 WiFiManagerParameter s_param_lon("radar_lon", "Longitude (deg)", "0",
                                 kCoordParamLen, kCoordInputAttrs);
+
+WiFiManagerParameter s_param_range("radar_range", "Radar range", "10",
+                                  kRangeParamLen);
+WiFiManagerParameter s_param_heading("heading_top", "Compass heading at top",
+                                    "0", kHeadingParamLen, kHeadingInputAttrs);
 
 char s_miles_checkbox_attrs[32] = "type=\"checkbox\"";
 WiFiManagerParameter s_param_miles("use_miles", "Display distances in miles", "T", 2,
@@ -87,11 +122,20 @@ WiFiManagerParameter s_param_runways("show_runways", "Show airport runways", "T"
 void refreshPortalParamDefaults() {
   char lat_buf[kCoordParamLen + 1];
   char lon_buf[kCoordParamLen + 1];
+  char range_buf[kRangeParamLen + 1];
+  char heading_buf[kHeadingParamLen + 1];
   snprintf(lat_buf, sizeof(lat_buf), "%.6f", services::location::lat());
   snprintf(lon_buf, sizeof(lon_buf), "%.6f", services::location::lon());
   s_param_lat.setValue(lat_buf, kCoordParamLen);
   s_param_lon.setValue(lon_buf, kCoordParamLen);
-  snprintf(s_miles_checkbox_attrs, sizeof(s_miles_checkbox_attrs), "type=\"checkbox\"%s",
+  snprintf(range_buf, sizeof(range_buf), "%.0f",
+           ui::radar::rangeCurrent().ring3_km);
+  s_param_range.setValue(range_buf, kRangeParamLen);
+  snprintf(heading_buf, sizeof(heading_buf), "%u",
+           ui::radar::headingAtTopDeg());
+  s_param_heading.setValue(heading_buf, kHeadingParamLen);
+  snprintf(s_miles_checkbox_attrs, sizeof(s_miles_checkbox_attrs),
+           "type=\"checkbox\"%s",
            ui::radar::useMiles() ? " checked" : "");
   s_param_miles.setValue("T", 2);
   snprintf(s_runways_checkbox_attrs, sizeof(s_runways_checkbox_attrs),
@@ -100,18 +144,42 @@ void refreshPortalParamDefaults() {
 }
 
 void onPortalParamsSaved() {
+  const bool has_application_params =
+      s_wm.server->hasArg("radar_lat") ||
+      s_wm.server->hasArg("radar_lon") ||
+      s_wm.server->hasArg("radar_range") ||
+      s_wm.server->hasArg("heading_top") ||
+      s_wm.server->hasArg("use_miles") ||
+      s_wm.server->hasArg("show_runways");
+  if (!has_application_params) {
+    // WiFiManager can invoke this callback again for a later portal request
+    // that contains no application parameters. Its internal buffers have
+    // already been cleared at this point, so restore them without saving.
+    refreshPortalParamDefaults();
+    return;
+  }
+
   if (!services::location::saveFromStrings(s_param_lat.getValue(),
                                            s_param_lon.getValue())) {
     Serial.println("Invalid lat/lon in portal — keeping previous location");
   }
+  if (!ui::radar::saveRangeFromPortal(s_param_range.getValue())) {
+    Serial.println("Invalid radar range in portal — use 1, 5, 10, 15, or 25 km");
+  }
+  if (!ui::radar::saveHeadingFromPortal(s_param_heading.getValue())) {
+    Serial.println("Invalid compass heading — use a degree value from 0 to 359");
+  }
   ui::radar::saveMilesFromPortal(s_param_miles.getValue());
   ui::radar::saveRunwaysFromPortal(s_param_runways.getValue());
+  refreshPortalParamDefaults();
 }
 
 void attachPortalParams(WiFiManager& wm) {
   refreshPortalParamDefaults();
   wm.addParameter(&s_param_lat);
   wm.addParameter(&s_param_lon);
+  wm.addParameter(&s_param_range);
+  wm.addParameter(&s_param_heading);
   wm.addParameter(&s_param_miles);
   wm.addParameter(&s_param_runways);
   wm.setSaveParamsCallback(onPortalParamsSaved);
@@ -223,6 +291,7 @@ void ensureWifiManager() {
   s_wm.setAPStaticIPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1),
                            IPAddress(255, 255, 255, 0));
   s_wm.setHostname(config::kPortalHostname);
+  s_wm.setCustomHeadElement(kRangeSelectScript);
   s_wm.setAPCallback(onConfigPortalApStarted);
   attachPortalParams(s_wm);
   s_wm_configured = true;
