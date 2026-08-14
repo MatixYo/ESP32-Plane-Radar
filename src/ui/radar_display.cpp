@@ -226,8 +226,12 @@ void latLonToScreen(float lat, float lon, int* out_x, int* out_y) {
   float dist_km = 0.0f;
   offsetKmFromCenter(lat, lon, &dx_km, &dy_km, &dist_km);
 
-  *out_x = radar::kCenterX + static_cast<int>(lroundf(dx_km * px_per_km));
-  *out_y = radar::kCenterY - static_cast<int>(lroundf(dy_km * px_per_km));
+  float screen_east = 0.0f;
+  float screen_north = 0.0f;
+  radar::rotateMapOffset(dx_km, dy_km, &screen_east, &screen_north);
+
+  *out_x = radar::kCenterX + static_cast<int>(lroundf(screen_east * px_per_km));
+  *out_y = radar::kCenterY - static_cast<int>(lroundf(screen_north * px_per_km));
 }
 
 bool isInsideOuterRingKm(float dist_km) { return dist_km <= innerRingMaxKm(); }
@@ -259,7 +263,10 @@ bool beyondRingEdgeDotFromLatLon(float lat, float lon, int* out_x, int* out_y) {
   const int cx = radar::kCenterX;
   const int cy = radar::kCenterY;
   const int rim_r = radar::kCenterX - radar::kBeyondRingScreenMarginPx;
-  const float angle_rad = atan2f(dx_km, dy_km);
+  float screen_east = 0.0f;
+  float screen_north = 0.0f;
+  radar::rotateMapOffset(dx_km, dy_km, &screen_east, &screen_north);
+  const float angle_rad = atan2f(screen_east, screen_north);
 
   *out_x = cx + static_cast<int>(lroundf(sinf(angle_rad) * rim_r));
   *out_y = cy - static_cast<int>(lroundf(cosf(angle_rad) * rim_r));
@@ -532,9 +539,11 @@ void drawAircraft() {
     const size_t i = items[d].index;
     const int x = items[d].x;
     const int y = items[d].y;
-    drawSpeedVector(x, y, planes[i].nose_deg, planes[i].track_deg,
+    drawSpeedVector(x, y, radar::headingToScreen(planes[i].nose_deg),
+                    radar::headingToScreen(planes[i].track_deg),
                     planes[i].gs_knots, radar::kColorTrackVector);
-    drawHeadingTriangle(x, y, planes[i].nose_deg, radar::kColorAircraft);
+    drawHeadingTriangle(x, y, radar::headingToScreen(planes[i].nose_deg),
+                        radar::kColorAircraft);
   }
   for (size_t d = 0; d < draw_count; ++d) {
     const size_t i = items[d].index;
@@ -615,13 +624,18 @@ void drawCenterDot(int cx, int cy) {
 void drawCardinalLabels() {
   const int cx = radar::kCenterX;
   const int cy = radar::kCenterY;
-  const int edge = radar::kSize - 1;
+  constexpr const char* kCardinals[] = {"N", "E", "S", "W"};
+  constexpr float kDegToRad = 0.01745329252f;
+  constexpr int kLabelRadius =
+      radar::kCenterX - radar::kCardinalLabelHeightPx / 2 + 1;
 
-  drawCardinalLabel("N", cx, radar::kCardinalNorthOffsetY, textdatum_t::top_center);
-  drawCardinalLabel("S", cx, edge + radar::kCardinalSouthOffsetY,
-                    textdatum_t::bottom_center);
-  drawCardinalLabel("W", 0, cy, textdatum_t::middle_left);
-  drawCardinalLabel("E", edge, cy, textdatum_t::middle_right);
+  for (size_t i = 0; i < 4; ++i) {
+    const float true_heading = static_cast<float>(i * 90U);
+    const float angle = radar::headingToScreen(true_heading) * kDegToRad;
+    const int x = cx + static_cast<int>(lroundf(sinf(angle) * kLabelRadius));
+    const int y = cy - static_cast<int>(lroundf(cosf(angle) * kLabelRadius));
+    drawCardinalLabel(kCardinals[i], x, y, textdatum_t::middle_center);
+  }
 }
 
 int scaleLabelAnchorX(int cx, int outer_radius) {
