@@ -20,6 +20,9 @@ bool g_radar_visible = false;
 unsigned long g_wifi_down_since = 0;
 unsigned long g_last_reconnect_ms = 0;
 unsigned long g_last_adsb_fetch_ms = 0;
+volatile bool g_adsb_fetch_requested = false;
+volatile bool g_adsb_fetch_running = false;
+volatile bool g_adsb_refresh_ready = false;
 
 void showRadarIfConnected() {
   if (WiFi.status() != WL_CONNECTED) {
@@ -49,15 +52,22 @@ void handleBootButton() {
   }
 }
 
-void fetchAndDrawAircraft() {
-  const float fetch_km = ui::radar::fetchRadiusKm();
-  if (!services::adsb::fetchUpdate(services::location::lat(),
-                                   services::location::lon(), fetch_km)) {
-    handleBootButton();
-    return;
+void fetchAircraftTask(void*) {
+  for (;;) {
+    if (!g_adsb_fetch_requested) {
+      delay(10);
+      continue;
+    }
+    g_adsb_fetch_requested = false;
+    g_adsb_fetch_running = true;
+
+    const float fetch_km = ui::radar::fetchRadiusKm();
+    if (services::adsb::fetchUpdate(services::location::lat(),
+                                    services::location::lon(), fetch_km)) {
+      g_adsb_refresh_ready = true;
+    }
+    g_adsb_fetch_running = false;
   }
-  ui::radarDisplayRefreshAircraft();
-  handleBootButton();
 }
 
 }  // namespace
@@ -75,7 +85,11 @@ void setup() {
   }
   services::location::init();
   ui::radar::rangeInit();
-  services::adsb::setPollFn(wifiLoop);
+  services::adsb::setPollFn(nullptr);
+  if (xTaskCreate(fetchAircraftTask, "adsb-fetch", 8192, nullptr, 1,
+                  nullptr) != pdPASS) {
+    Serial.println("adsb: failed to create fetch task");
+  }
 
   if (wifiSetupConnect()) {
     showRadarIfConnected();
@@ -109,11 +123,21 @@ void loop() {
     g_wifi_down_since = 0;
     if (!g_radar_visible) {
       showRadarIfConnected();
-    } else if (millis() - g_last_adsb_fetch_ms >= config::kAdsbFetchIntervalMs) {
+    } else if (!g_adsb_fetch_running && !g_adsb_fetch_requested &&
+               millis() - g_last_adsb_fetch_ms >= config::kAdsbFetchIntervalMs) {
       g_last_adsb_fetch_ms = millis();
-      fetchAndDrawAircraft();
+      g_adsb_fetch_requested = true;
+    }
+    if (g_adsb_refresh_ready) {
+      g_adsb_refresh_ready = false;
+      ui::radarDisplayRefreshAircraft();
+    }
+    if (g_radar_visible) {
+      ui::radarDisplayAnimate();
     }
   }
 
-  delay(10);
+  // Keep animation cadence fine-grained; a 10 ms loop delay quantizes a
+  // requested 25 ms sweep interval into visibly uneven 30/40 ms steps.
+  delay(1);
 }
