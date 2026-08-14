@@ -4,6 +4,7 @@
 
 #include <Preferences.h>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 
@@ -15,7 +16,7 @@ constexpr char kPrefsNamespace[] = "planeradar";
 constexpr char kPrefsRangeKey[] = "rangeIdx";
 constexpr char kPrefsMilesKey[] = "useMiles";
 constexpr char kPrefsRunwaysKey[] = "showRwys";
-constexpr uint8_t kDefaultRangeIndex = 1;  // 10 km ring
+constexpr uint8_t kDefaultRangeIndex = 2;  // 10 km ring
 constexpr float kKmPerMile = 1.609344f;
 
 Preferences s_prefs;
@@ -81,6 +82,28 @@ void rangeNext() {
 const RangePreset& rangeCurrent() { return kRangePresets[s_range_index]; }
 
 uint8_t rangeIndex() { return s_range_index; }
+
+bool saveRangeFromPortal(const char* range_km_value) {
+  if (range_km_value == nullptr || range_km_value[0] == '\0') {
+    return false;
+  }
+
+  char* end = nullptr;
+  const float requested_km = strtof(range_km_value, &end);
+  if (end == range_km_value || *end != '\0') {
+    return false;
+  }
+
+  for (size_t i = 0; i < kRangePresetCount; ++i) {
+    if (fabsf(requested_km - kRangePresets[i].ring3_km) < 0.01f) {
+      s_range_index = static_cast<uint8_t>(i);
+      saveRangeIndex();
+      Serial.printf("Radar range: %.0f km\n", rangeCurrent().ring3_km);
+      return true;
+    }
+  }
+  return false;
+}
 
 float fetchRadiusKm() {
   const float outer_km = rangeCurrent().outer_km;

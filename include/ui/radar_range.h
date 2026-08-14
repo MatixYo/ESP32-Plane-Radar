@@ -9,6 +9,7 @@ namespace ui::radar {
  * Range presets (label on ring 3 = ¾ of outer radius).
  *
  * Recommended for ADS-B on a 1.28″ display:
+ *   1 km  — high density areas
  *   5 km  — pattern / very local (airfield vicinity)
  *  10 km  — default; neighborhood spotting
  *  15 km  — wider local area
@@ -25,6 +26,7 @@ struct RangePreset {
 constexpr float kRing3ToOuterKm = 4.0f / 3.0f;
 
 constexpr RangePreset kRangePresets[] = {
+    {1.0f, 1.0f * kRing3ToOuterKm},
     {5.0f, 5.0f * kRing3ToOuterKm},
     {10.0f, 10.0f * kRing3ToOuterKm},
     {15.0f, 15.0f * kRing3ToOuterKm},
@@ -40,6 +42,8 @@ void rangeInit();
 void rangeNext();
 const RangePreset& rangeCurrent();
 uint8_t rangeIndex();
+/** Save a portal range value matching one of the configured ring-3 presets. */
+bool saveRangeFromPortal(const char* range_km_value);
 /** ADSB fetch radius (km): scaled to screen edge so beyond-ring dots have data. */
 float fetchRadiusKm();
 
