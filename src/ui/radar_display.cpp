@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <cstdlib>
 
 #include "config.h"
@@ -29,6 +30,7 @@ uint16_t kColorTagType = 0x5DFF;
 uint16_t kColorTagAltitude = 0xFFE0;
 uint16_t kColorRunway = 0x4D5F;
 uint16_t kColorRunwayLabel = 0x7DFF;
+uint16_t kColorSweep = 0x07E0;
 
 }  // namespace radar
 
@@ -53,6 +55,9 @@ int s_scale_label_h = 0;
 lgfx::LovyanGFX* s_draw = &tft;
 LGFX_Sprite s_frame(&tft);
 bool s_frame_ready = false;
+unsigned long s_last_sweep_frame_ms = 0;
+float s_previous_sweep_deg = 0.0f;
+bool s_previous_sweep_valid = false;
 
 class DrawScope {
  public:
@@ -196,6 +201,8 @@ void initPalette() {
       tft.color565(radar::kRunwayR, radar::kRunwayG, radar::kRunwayB);
   radar::kColorRunwayLabel = tft.color565(radar::kRunwayLabelR, radar::kRunwayLabelG,
                                           radar::kRunwayLabelB);
+  radar::kColorSweep =
+      tft.color565(radar::kSweepR, radar::kSweepG, radar::kSweepB);
 }
 
 constexpr float kKmPerDeg = 111.0f;
@@ -621,6 +628,23 @@ void drawCenterDot(int cx, int cy) {
   s_draw->fillSmoothCircle(cx, cy, radar::kCenterDotRadius, radar::kColorCenter);
 }
 
+float sweepHeadingDeg(unsigned long now) {
+  const unsigned long phase_ms = now % radar::kSweepRevolutionMs;
+  return 360.0f * static_cast<float>(phase_ms) /
+         radar::kSweepRevolutionMs;
+}
+
+void drawSweep(float head_deg) {
+  constexpr float kDegToRad = 0.01745329252f;
+  const float angle = head_deg * kDegToRad;
+  const int x = radar::kCenterX + static_cast<int>(
+      lroundf(sinf(angle) * radar::kGridOuterRadius));
+  const int y = radar::kCenterY - static_cast<int>(
+      lroundf(cosf(angle) * radar::kGridOuterRadius));
+  s_draw->drawWideLine(radar::kCenterX, radar::kCenterY, x, y,
+                       radar::kSweepLineHalfWidth, radar::kColorSweep);
+}
+
 void drawCardinalLabels() {
   const int cx = radar::kCenterX;
   const int cy = radar::kCenterY;
@@ -673,6 +697,8 @@ bool ensureFrameSprite() {
   if (s_frame_ready) {
     return true;
   }
+  // The cached radar remains RGB565 so aircraft, labels, and runway colors use
+  // the exact same rendering path and color depth as a non-animated frame.
   s_frame.setColorDepth(16);
   if (!s_frame.createSprite(radar::kSize, radar::kSize)) {
     Serial.println("radar: frame sprite alloc failed");
@@ -685,14 +711,45 @@ bool ensureFrameSprite() {
 // Double-buffered frame: composite the grid AND aircraft into the off-screen
 // sprite, then blit it to the panel in a single pushSprite. Because the panel
 // is updated in one pass, labels never show an erase/redraw gap — no flicker.
-void renderFrame() {
+void renderBaseFrame() {
   drawStaticGrid(s_frame);  // opens its own DrawScope(s_frame)
   {
     const DrawScope scope(s_frame);
     drawAircraft();
   }
-  s_frame.pushSprite(0, 0);
-  tft.setTextDatum(textdatum_t::top_left);
+}
+
+void restoreSweepLine(float angle_deg) {
+  if (!s_frame_ready) {
+    return;
+  }
+
+  constexpr float kDegToRad = 0.01745329252f;
+  const float angle = angle_deg * kDegToRad;
+  const int x0 = radar::kCenterX;
+  const int y0 = radar::kCenterY;
+  const int x1 = radar::kCenterX + static_cast<int>(
+      lroundf(sinf(angle) * radar::kGridOuterRadius));
+  const int y1 = radar::kCenterY - static_cast<int>(
+      lroundf(cosf(angle) * radar::kGridOuterRadius));
+
+  // Restore a padded rectangle through LovyanGFX's conversion path. Reading
+  // the raw sprite buffer directly is unsafe because its RGB565 byte order can
+  // differ from the panel's expected write order.
+  constexpr int kPadding = 3;
+  const int left = std::max(0, std::min(x0, x1) - kPadding);
+  const int top = std::max(0, std::min(y0, y1) - kPadding);
+  const int right =
+      std::min(radar::kSize - 1, std::max(x0, x1) + kPadding);
+  const int bottom =
+      std::min(radar::kSize - 1, std::max(y0, y1) + kPadding);
+  const int width = right - left + 1;
+
+  uint16_t row_pixels[radar::kSize];
+  for (int y = top; y <= bottom; ++y) {
+    s_frame.readRect(left, y, width, 1, row_pixels);
+    tft.pushImage(left, y, width, 1, row_pixels);
+  }
 }
 
 }  // namespace
@@ -700,24 +757,86 @@ void renderFrame() {
 void radarDisplayDraw() {
   initPalette();
   initLabelMetrics();
+  s_last_sweep_frame_ms = millis();
+  const float sweep_deg = sweepHeadingDeg(s_last_sweep_frame_ms);
+  s_previous_sweep_deg = sweep_deg;
 
   if (ensureFrameSprite()) {
-    renderFrame();
+    renderBaseFrame();
+    s_frame.pushSprite(0, 0);
+    if (radar::sweepEnabled()) {
+      const DrawScope scope(tft);
+      drawSweep(sweep_deg);
+    }
+    s_previous_sweep_valid = radar::sweepEnabled();
     return;
   }
 
   // Fallback when the sprite can't be allocated: draw straight to the panel.
   const DrawScope scope(tft);
   drawStaticGrid(tft);
+  if (radar::sweepEnabled()) {
+    drawSweep(sweep_deg);
+  }
   drawAircraft();
   tft.setTextDatum(textdatum_t::top_left);
 }
 
 void radarDisplayRefreshAircraft() {
   initPalette();
+  s_last_sweep_frame_ms = millis();
+  // Aircraft updates arrive on roughly the same cadence as one revolution.
+  // Preserve the current fixed-step angle so a network completion cannot jump
+  // the beam forward and permanently skip a sector of the circle.
+  const float sweep_deg = s_previous_sweep_valid
+                              ? s_previous_sweep_deg
+                              : sweepHeadingDeg(s_last_sweep_frame_ms);
+  s_previous_sweep_deg = sweep_deg;
 
   if (ensureFrameSprite()) {
-    renderFrame();
+    renderBaseFrame();
+    s_frame.pushSprite(0, 0);
+    if (radar::sweepEnabled()) {
+      const DrawScope scope(tft);
+      drawSweep(sweep_deg);
+    }
+    s_previous_sweep_valid = radar::sweepEnabled();
+    return;
+  }
+
+  radarDisplayDraw();
+}
+
+void radarDisplayAnimate() {
+  const unsigned long now = millis();
+  if (!radar::sweepEnabled()) {
+    if (s_previous_sweep_valid && ensureFrameSprite()) {
+      restoreSweepLine(s_previous_sweep_deg);
+    }
+    s_previous_sweep_valid = false;
+    return;
+  }
+  if (now - s_last_sweep_frame_ms < radar::kSweepFrameIntervalMs) {
+    return;
+  }
+  s_last_sweep_frame_ms = now;
+  float sweep_deg = s_previous_sweep_valid
+                        ? s_previous_sweep_deg + radar::kSweepStepDegrees
+                        : sweepHeadingDeg(now);
+  if (sweep_deg >= 360.0f) {
+    sweep_deg -= 360.0f;
+  }
+
+  if (ensureFrameSprite()) {
+    if (s_previous_sweep_valid) {
+      restoreSweepLine(s_previous_sweep_deg);
+    }
+    {
+      const DrawScope scope(tft);
+      drawSweep(sweep_deg);
+    }
+    s_previous_sweep_deg = sweep_deg;
+    s_previous_sweep_valid = true;
     return;
   }
 

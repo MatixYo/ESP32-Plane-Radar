@@ -49,6 +49,7 @@ float fetchRadiusKm();
 
 bool useMiles();
 bool showRunways();
+bool sweepEnabled();
 /** True heading, in degrees, displayed at the top of the radar. */
 uint16_t headingAtTopDeg();
 /** Rotate an east/north map offset into the configured screen orientation. */
@@ -59,6 +60,7 @@ float headingToScreen(float heading_deg);
 /** WiFi portal checkbox: "T" = miles, otherwise km. */
 void saveMilesFromPortal(const char* checkbox_value);
 void saveRunwaysFromPortal(const char* checkbox_value);
+void saveSweepFromPortal(const char* checkbox_value);
 bool saveHeadingFromPortal(const char* heading_deg_value);
 void formatRing3Label(char* buf, size_t len, float ring3_km, bool use_miles);
 void formatCurrentRing3Label(char* buf, size_t len);

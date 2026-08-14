@@ -18,8 +18,9 @@ constexpr float kKmPerNm = 1.852f;
 constexpr int kConnectAttemptMs = 200;
 constexpr unsigned long kRequestTimeoutMs = 10000;
 
-Aircraft s_aircraft[kMaxAircraft];
-size_t s_aircraft_count = 0;
+Aircraft s_aircraft[2][kMaxAircraft];
+size_t s_aircraft_count[2] = {0, 0};
+volatile uint8_t s_active_aircraft = 0;
 PollFn s_poll_fn = nullptr;
 
 void pollNetwork() {
@@ -180,11 +181,13 @@ void fillTagFields(Aircraft* ac, const JsonObject& plane) {
 
 void setPollFn(PollFn fn) { s_poll_fn = fn; }
 
-size_t aircraftCount() { return s_aircraft_count; }
+size_t aircraftCount() { return s_aircraft_count[s_active_aircraft]; }
 
-const Aircraft* aircraftList() { return s_aircraft; }
+const Aircraft* aircraftList() { return s_aircraft[s_active_aircraft]; }
 
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
+  const uint8_t update_index = static_cast<uint8_t>(1U - s_active_aircraft);
+  Aircraft* updated = s_aircraft[update_index];
   const float dist_nm = kmToNauticalMiles(fetch_radius_km);
 
   String url = kApiBase;
@@ -226,7 +229,8 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
 
   JsonArray ac = doc["ac"].as<JsonArray>();
   if (ac.isNull()) {
-    s_aircraft_count = 0;
+    s_aircraft_count[update_index] = 0;
+    s_active_aircraft = update_index;
     return true;
   }
 
@@ -242,16 +246,17 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
       continue;
     }
 
-    s_aircraft[n].lat = plane["lat"].as<float>();
-    s_aircraft[n].lon = plane["lon"].as<float>();
-    s_aircraft[n].nose_deg = pickNoseHeading(plane);
-    s_aircraft[n].track_deg = pickTrackHeading(plane);
-    s_aircraft[n].gs_knots = pickGroundSpeed(plane);
-    fillTagFields(&s_aircraft[n], plane);
+    updated[n].lat = plane["lat"].as<float>();
+    updated[n].lon = plane["lon"].as<float>();
+    updated[n].nose_deg = pickNoseHeading(plane);
+    updated[n].track_deg = pickTrackHeading(plane);
+    updated[n].gs_knots = pickGroundSpeed(plane);
+    fillTagFields(&updated[n], plane);
     ++n;
   }
 
-  s_aircraft_count = n;
+  s_aircraft_count[update_index] = n;
+  s_active_aircraft = update_index;
   Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
   return true;
 }

@@ -16,6 +16,9 @@ constexpr char kPrefsNamespace[] = "planeradar";
 constexpr char kPrefsRangeKey[] = "rangeIdx";
 constexpr char kPrefsMilesKey[] = "useMiles";
 constexpr char kPrefsRunwaysKey[] = "showRwys";
+// New key intentionally ignores the earlier experimental sweep-on value so
+// devices testing pre-release builds also start with the new off default.
+constexpr char kPrefsSweepKey[] = "sweepOn";
 constexpr char kPrefsHeadingKey[] = "headingTop";
 constexpr uint8_t kDefaultRangeIndex = 2;  // 10 km ring
 constexpr float kKmPerMile = 1.609344f;
@@ -24,6 +27,7 @@ Preferences s_prefs;
 uint8_t s_range_index = kDefaultRangeIndex;
 bool s_use_miles = false;
 bool s_show_runways = true;
+bool s_sweep_enabled = false;
 uint16_t s_heading_at_top_deg = 0;
 
 bool validHeadingAtTop(uint16_t heading) {
@@ -51,6 +55,14 @@ void saveShowRunways() {
     return;
   }
   s_prefs.putBool(kPrefsRunwaysKey, s_show_runways);
+  s_prefs.end();
+}
+
+void saveSweepEnabled() {
+  if (!s_prefs.begin(kPrefsNamespace, false)) {
+    return;
+  }
+  s_prefs.putBool(kPrefsSweepKey, s_sweep_enabled);
   s_prefs.end();
 }
 
@@ -85,6 +97,7 @@ void rangeInit() {
       (saved < kRangePresetCount) ? saved : kDefaultRangeIndex;
   s_use_miles = s_prefs.getBool(kPrefsMilesKey, false);
   s_show_runways = s_prefs.getBool(kPrefsRunwaysKey, true);
+  s_sweep_enabled = s_prefs.getBool(kPrefsSweepKey, false);
   const uint16_t saved_heading = s_prefs.getUShort(kPrefsHeadingKey, 0);
   s_heading_at_top_deg = validHeadingAtTop(saved_heading) ? saved_heading : 0;
   s_prefs.end();
@@ -132,6 +145,8 @@ bool useMiles() { return s_use_miles; }
 
 bool showRunways() { return s_show_runways; }
 
+bool sweepEnabled() { return s_sweep_enabled; }
+
 uint16_t headingAtTopDeg() { return s_heading_at_top_deg; }
 
 void rotateMapOffset(float east, float north, float* screen_east,
@@ -161,6 +176,12 @@ void saveRunwaysFromPortal(const char* checkbox_value) {
   s_show_runways = portalCheckboxChecked(checkbox_value);
   saveShowRunways();
   Serial.printf("Runway overlay: %s\n", s_show_runways ? "on" : "off");
+}
+
+void saveSweepFromPortal(const char* checkbox_value) {
+  s_sweep_enabled = portalCheckboxChecked(checkbox_value);
+  saveSweepEnabled();
+  Serial.printf("Radar sweep: %s\n", s_sweep_enabled ? "on" : "off");
 }
 
 bool saveHeadingFromPortal(const char* heading_deg_value) {
@@ -196,10 +217,12 @@ void formatCurrentRing3Label(char* buf, size_t len) {
 void unitsReset() {
   s_use_miles = false;
   s_show_runways = true;
+  s_sweep_enabled = false;
   s_heading_at_top_deg = 0;
   if (s_prefs.begin(kPrefsNamespace, false)) {
     s_prefs.remove(kPrefsMilesKey);
     s_prefs.remove(kPrefsRunwaysKey);
+    s_prefs.remove(kPrefsSweepKey);
     s_prefs.remove(kPrefsHeadingKey);
     s_prefs.end();
   }
