@@ -531,7 +531,7 @@ void drawAircraft() {
 
   sortBeyondDotsFarFirst(dots, dot_count);
   for (size_t d = 0; d < dot_count; ++d) {
-    const size_t i = items[d].index;
+    const size_t i = dots[d].index;
     drawBeyondRingDot(dots[d].x, dots[d].y,
           planes[i].isMilitary ? 
             radar::kColorMilitaryAircraft : 
