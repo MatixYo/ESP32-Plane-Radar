@@ -96,7 +96,7 @@ bool readJsonFloat(const JsonObject& obj, const char* key, float* out) {
 }
 
 bool isMilitary(const JsonObject& plane) {
-  return plane["dbFlags"].is<int>() && plane["dbFlags"].as<int>() & 1;
+  return plane["dbFlags"].is<byte>() && plane["dbFlags"].as<byte>() & 1;
 }
 
 float pickNoseHeading(const JsonObject& plane) {
