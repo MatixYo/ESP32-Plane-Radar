@@ -263,6 +263,8 @@ bool parseBody(platform::BodyReader& body) {
 
 void setPollFn(platform::PollFn fn) { s_poll_fn = fn; }
 
+void clear() { s_aircraft_count = 0; }
+
 size_t aircraftCount() { return s_aircraft_count; }
 
 const Aircraft* aircraftList() { return s_aircraft; }

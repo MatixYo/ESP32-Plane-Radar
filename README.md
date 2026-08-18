@@ -17,8 +17,9 @@ After Wi‑Fi is saved, the device reconnects automatically; the radar runs in t
 
 | Action | Effect |
 |--------|--------|
-| **Short tap** | Cycle range preset (10 → 20 → 40 → 80 NM); saved to flash |
-| **Hold 3 s** | Clear Wi‑Fi, location, and units; reboot into setup portal |
+| **Short tap** | Cycle range preset (10 → 20 → 40 → 80 NM); saved to flash (~500 ms after release, so a double tap does not also change range) |
+| **Double tap** | Cycle configured airport sites (ICAO list from the portal); active code shown on the left of the radar |
+| **Hold 3 s** | Clear Wi‑Fi, location, airport list, and units; reboot into setup portal |
 
 During setup you can also hold BOOT at power-on to force a credential reset (same as the long press).
 
@@ -41,7 +42,8 @@ The same portal runs on the setup AP and on the device’s LAN IP while connecte
 
 | Field | Purpose |
 |-------|---------|
-| **Latitude / Longitude** | Radar center and ADS-B query position (defaults in `config.h` until set) |
+| **Airport 1–6 (ICAO)** | Up to six large airports to cycle with a double tap (e.g. `LOWG`, `LOWW`); leave unused slots blank |
+| **Latitude / Longitude** | Radar center fallback when no airport list is set, and manual override stored in NVS |
 | **Display distances in km** | Ring scale label in **km** instead of the default **NM** (e.g. `74km` vs `40NM`) |
 | **Show airport runways** | Major-airport runway overlay on the radar (off to hide) |
 
@@ -71,7 +73,7 @@ Homebrew's `sdl2` is now **sdl2-compat**, which serves the SDL2 API from SDL3, a
 |---|---|---|
 | Settings | NVS | `~/.plane-radar/settings.json` (`$PLANE_RADAR_SETTINGS` overrides) |
 | Config portal | captive portal on the AP | `http://127.0.0.1:8080` |
-| BOOT button | GPIO 9 | **SPACE** key (tap and 3 s hold both work) |
+| BOOT button | GPIO 9 | **SPACE** key (single/double tap and 3 s hold) |
 | Aircraft data | live adsb.fi | live adsb.fi |
 
 Extra shortcuts from LovyanGFX: **Ctrl+1…6** rescales the window, **Ctrl+L/R** rotates it.

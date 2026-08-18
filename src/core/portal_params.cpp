@@ -12,8 +12,16 @@ namespace {
 
 constexpr int kCoordLen = 20;
 constexpr char kCoordAttrs[] = " type=\"number\" step=\"0.000001\"";
+constexpr char kSiteTextAttrs[] =
+    " type=\"text\" maxlength=\"4\" autocapitalize=\"characters\"";
 
 constexpr Field kFields[] = {
+    {"site_1", "Airport 1 (ICAO)", kSiteTextAttrs, Kind::kText, 5, false},
+    {"site_2", "Airport 2 (ICAO)", kSiteTextAttrs, Kind::kText, 5, false},
+    {"site_3", "Airport 3 (ICAO)", kSiteTextAttrs, Kind::kText, 5, false},
+    {"site_4", "Airport 4 (ICAO)", kSiteTextAttrs, Kind::kText, 5, false},
+    {"site_5", "Airport 5 (ICAO)", kSiteTextAttrs, Kind::kText, 5, false},
+    {"site_6", "Airport 6 (ICAO)", kSiteTextAttrs, Kind::kText, 5, false},
     {"radar_lat", "Latitude (deg)", kCoordAttrs, Kind::kNumber, kCoordLen,
      false},
     {"radar_lon", "Longitude (deg)", kCoordAttrs, Kind::kNumber, kCoordLen,
@@ -24,15 +32,22 @@ constexpr Field kFields[] = {
      Kind::kCheckbox, 2, true},
 };
 
-/**
- * Latitude and longitude are staged rather than applied immediately: they are
- * validated as a pair, and a form that submits a good latitude with a bad
- * longitude must change neither.
- */
 char s_pending_lat[kCoordLen + 1] = "";
 char s_pending_lon[kCoordLen + 1] = "";
+char s_pending_sites[settings::kMaxSites][6] = {};
 
-bool isField(const Field& f, const char* id) { return strcmp(f.id, id) == 0; }
+bool isField(const Field& f, const char* id) {
+  return f.id != nullptr && id != nullptr && strcmp(f.id, id) == 0;
+}
+
+bool isSiteField(const Field& f) {
+  return f.id != nullptr && strncmp(f.id, "site_", 5) == 0 &&
+         f.id[5] >= '1' && f.id[5] <= '6' && f.id[6] == '\0';
+}
+
+size_t siteFieldSlot(const Field& f) {
+  return static_cast<size_t>(f.id[5] - '1');
+}
 
 }  // namespace
 
@@ -45,8 +60,11 @@ void currentValue(const Field& field, char* buf, size_t len) {
     return;
   }
   if (field.kind == Kind::kCheckbox) {
-    // State lives in the `checked` attribute, not the value; see the header.
     snprintf(buf, len, "T");
+    return;
+  }
+  if (isSiteField(field)) {
+    snprintf(buf, len, "%s", settings::siteSlotIdent(siteFieldSlot(field)));
     return;
   }
   if (isField(field, "radar_lat")) {
@@ -62,22 +80,28 @@ void htmlAttrs(const Field& field, char* buf, size_t len) {
   if (len == 0) {
     return;
   }
-  if (field.kind != Kind::kCheckbox) {
-    snprintf(buf, len, "%s", field.html_attrs);
+  if (field.kind == Kind::kCheckbox) {
+    bool on = false;
+    if (isField(field, "use_km")) {
+      on = settings::useKm();
+    } else if (isField(field, "show_runways")) {
+      on = settings::showRunways();
+    }
+    snprintf(buf, len, "%s%s", field.html_attrs, on ? " checked" : "");
     return;
   }
 
-  bool on = false;
-  if (isField(field, "use_km")) {
-    on = settings::useKm();
-  } else if (isField(field, "show_runways")) {
-    on = settings::showRunways();
-  }
-
-  snprintf(buf, len, "%s%s", field.html_attrs, on ? " checked" : "");
+  snprintf(buf, len, "%s", field.html_attrs);
 }
 
 void applyValue(const Field& field, const char* value) {
+  if (isSiteField(field)) {
+    const size_t slot = siteFieldSlot(field);
+    strncpy(s_pending_sites[slot], value != nullptr ? value : "",
+            sizeof(s_pending_sites[slot]) - 1);
+    s_pending_sites[slot][sizeof(s_pending_sites[slot]) - 1] = '\0';
+    return;
+  }
   if (isField(field, "radar_lat")) {
     strncpy(s_pending_lat, value != nullptr ? value : "",
             sizeof(s_pending_lat) - 1);
@@ -107,12 +131,25 @@ bool applyValueById(const char* id, const char* value) {
 }
 
 void commit() {
+  const char* idents[settings::kMaxSites];
+  size_t n = 0;
+  for (size_t i = 0; i < settings::kMaxSites; ++i) {
+    if (s_pending_sites[i][0] != '\0') {
+      idents[n++] = s_pending_sites[i];
+    }
+  }
+  settings::saveSites(idents, n);
+
   if (!settings::saveLocationFromStrings(s_pending_lat, s_pending_lon)) {
     platform::logf(
         "Invalid lat/lon in portal — keeping previous location\n");
   }
+
   s_pending_lat[0] = '\0';
   s_pending_lon[0] = '\0';
+  for (size_t i = 0; i < settings::kMaxSites; ++i) {
+    s_pending_sites[i][0] = '\0';
+  }
 }
 
 }  // namespace core::portal

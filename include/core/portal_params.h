@@ -14,12 +14,13 @@ namespace core::portal {
 
 enum class Kind {
   kNumber,    ///< free-text numeric input
+  kText,      ///< plain text (ICAO codes)
   kCheckbox,  ///< see core::settings::portalCheckboxChecked for the quirk
 };
 
 struct Field {
   const char* id;          ///< form field name, and the NVS-facing identity
-  const char* label;       ///< human-readable label
+  const char* label;       ///< human-readable label (empty => no label)
   const char* html_attrs;  ///< extra attributes injected into the <input>
   Kind kind;
   int max_len;      ///< WiFiManagerParameter buffer length
@@ -45,12 +46,12 @@ void currentValue(const Field& field, char* buf, size_t len);
  * Writes into a caller-owned buffer rather than returning internal storage:
  * WiFiManagerParameter keeps the `custom` string as a pointer instead of
  * copying it, so each field needs its own buffer that outlives the portal, and
- * a refresh must rewrite that buffer in place.
+ * a refresh must rewrite this buffer in place.
  */
 void htmlAttrs(const Field& field, char* buf, size_t len);
 
 /** Suggested size for the htmlAttrs() buffer. */
-constexpr size_t kHtmlAttrsMax = 48;
+constexpr size_t kHtmlAttrsMax = 64;
 
 /** Apply one submitted value. Invalid input is logged and ignored. */
 void applyValue(const Field& field, const char* value);

@@ -74,7 +74,7 @@ bool wifiLinkUp();
  * WiFiManagerParameters, so the captive portal and the native harness's local
  * portal cannot drift apart.
  */
-constexpr size_t kMaxPortalFields = 8;
+constexpr size_t kMaxPortalFields = 12;
 constexpr int kValueBufLen = 24;
 
 WiFiManagerParameter* s_params[kMaxPortalFields] = {nullptr};
@@ -116,8 +116,6 @@ void attachPortalParams(WiFiManager& wm) {
     char value[kValueBufLen];
     core::portal::currentValue(fields[i], value, sizeof(value));
 
-    // Allocated once at first portal setup and intentionally never freed:
-    // WiFiManager holds these for the lifetime of the program.
     s_params[i] = new WiFiManagerParameter(
         fields[i].id, fields[i].label, value, fields[i].max_len, s_attrs[i],
         fields[i].label_after ? WFM_LABEL_AFTER : WFM_LABEL_BEFORE);

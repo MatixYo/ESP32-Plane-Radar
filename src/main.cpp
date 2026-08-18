@@ -11,6 +11,7 @@
 #include "ui/display.h"
 #include "core/adsb.h"
 #include "core/settings.h"
+#include "core/tap_gesture.h"
 #include "platform/wifi_setup.h"
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
@@ -46,10 +47,45 @@ void onRangeTap() {
   }
 }
 
+void onSiteTap() {
+  if (core::settings::siteCount() < 2) {
+    return;
+  }
+  core::settings::siteNext();
+  core::adsb::clear();
+  const char* ident = core::settings::siteActiveIdent();
+  if (ident != nullptr) {
+    pf::logf("Site: %s (%.6f, %.6f)\n", ident, core::settings::lat(),
+             core::settings::lon());
+  }
+  if (g_radar_visible && wifiIsConnected()) {
+    ui::radarDisplayDraw();
+  }
+  g_last_adsb_fetch_ms = pf::nowMs() - config::kAdsbFetchIntervalMs +
+                         config::kAdsbMinRefetchMs;
+}
+
 void handleBootButton() {
   bootButtonPollLongPress();
   if (bootButtonConsumeTap()) {
-    onRangeTap();
+    core::gesture::tapPress(pf::nowMs());
+  }
+  switch (core::gesture::tapPoll(pf::nowMs())) {
+    case core::gesture::Tap::kSingle:
+      onRangeTap();
+      break;
+    case core::gesture::Tap::kDouble:
+      onSiteTap();
+      break;
+    default:
+      break;
+  }
+}
+
+void pollWifiAndTaps() {
+  wifiLoop();
+  if (bootButtonConsumeTap()) {
+    core::gesture::tapPress(pf::nowMs());
   }
 }
 
@@ -77,7 +113,7 @@ void setup() {
   }
   core::settings::init();
   ui::radar::rangeInit();
-  core::adsb::setPollFn(wifiLoop);
+  core::adsb::setPollFn(pollWifiAndTaps);
 
   if (wifiSetupConnect()) {
     showRadarIfConnected();

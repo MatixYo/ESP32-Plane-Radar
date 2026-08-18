@@ -23,6 +23,9 @@ const Aircraft* aircraftList();
  */
 void setPollFn(platform::PollFn fn);
 
+/** Drop cached aircraft (e.g. after switching radar centre). */
+void clear();
+
 /** Fetch aircraft within fetch_radius_km of the given centre. */
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km);
 

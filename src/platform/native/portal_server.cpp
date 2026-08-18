@@ -279,8 +279,6 @@ void appendField(std::string* html, const core::portal::Field& field) {
   char value[kValueBufLen];
   core::portal::currentValue(field, value, sizeof(value));
 
-  // htmlAttrs() writes the table's raw attribute string, which may or may not
-  // carry a leading space; normalise so the tag is always well formed.
   const char* attrs_begin = attrs;
   while (*attrs_begin == ' ') {
     ++attrs_begin;

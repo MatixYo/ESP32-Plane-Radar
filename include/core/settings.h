@@ -61,7 +61,9 @@ constexpr size_t kRangePresetCount =
  * every already-configured device on the next firmware update.
  */
 constexpr char kNsLocation[] = "radar";     ///< keys: lat, lon
-constexpr char kNsRadar[] = "planeradar";   ///< keys: rangeIdx, useKm, showRwys
+constexpr char kNsRadar[] = "planeradar";   ///< keys: rangeIdx, useKm, showRwys, sites, siteIdx
+
+constexpr size_t kMaxSites = 6;
 
 // --- Lifecycle ---------------------------------------------------------------
 
@@ -78,6 +80,16 @@ bool saveLocationFromStrings(const char* lat_str, const char* lon_str);
 
 /** Clear stored coordinates and revert to the config defaults. */
 void clearLocation();
+
+// --- Airport site list -------------------------------------------------------
+
+size_t siteCount();
+const char* siteIdent(size_t index);
+const char* siteSlotIdent(size_t slot);
+const char* siteActiveIdent();
+uint8_t siteIndex();
+void siteNext();
+bool saveSites(const char* const* idents, size_t count);
 
 // --- Range preset ------------------------------------------------------------
 

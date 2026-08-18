@@ -12,25 +12,31 @@ description: Configure WiFiManager captive portal, LAN config portal, mDNS, port
 | Setup AP | No saved WiFi, or after credential wipe | SSID `PlaneRadar-Setup`, IP `192.168.4.1` |
 | LAN portal | Connected to home WiFi | `http://plane-radar.local` or device IP |
 
-Both use the same WiFiManager instance and custom fields. mDNS requires `-DWM_MDNS` in `platformio.ini`.
+Both use the same WiFiManager instance and custom fields from `core::portal`. mDNS requires `-DWM_MDNS` in `platformio.ini`.
 
 ## Custom portal fields
 
-Defined in `wifi_setup.cpp`:
+Defined once in `src/core/portal_params.cpp` (rendered by device WiFiManager and native HTTP server):
 
 | Parameter ID | Label | Saved by |
 |--------------|-------|----------|
-| `radar_lat` | Latitude (deg) | `services::location::saveFromStrings()` |
-| `radar_lon` | Longitude (deg) | `services::location::saveFromStrings()` |
-| `use_miles` | Display distances in miles | `ui::radar::saveMilesFromPortal()` |
-| `show_runways` | Show airport runways | `ui::radar::saveRunwaysFromPortal()` |
+| `site_1` … `site_6` | Airport N (ICAO) | `core::settings::saveSites()` |
+| `radar_lat` | Latitude (deg) | `core::settings::saveLocationFromStrings()` |
+| `radar_lon` | Longitude (deg) | `core::settings::saveLocationFromStrings()` |
+| `use_km` | Display distances in km | `core::settings::saveKmFromPortal()` |
+| `show_runways` | Show airport runways | `core::settings::saveRunwaysFromPortal()` |
 
-Save callback: `onPortalParamsSaved()` via `wm.setSaveParamsCallback()`.
+All six airport slots are always visible; leave unused ones blank.
+
+Save callback: `onPortalParamsSaved()` → `core::portal::commit()` via `wm.setSaveParamsCallback()`.
 
 ## NVS for portal state
 
 - Namespace `wifi`, key `portal` — forces setup screen on next boot after credential wipe
-- Separate from `radar` (lat/lon) and `planeradar` (range/units/runways)
+- Namespace `radar`: `lat`, `lon` — manual centre fallback
+- Namespace `planeradar`: `rangeIdx`, `useKm`, `showRwys`, `sites` (comma-separated ICAO), `siteIdx`
+
+When `sites` is non-empty, `core::settings::lat()`/`lon()` resolve from the active airport ident via `core::airport::findAirport()`.
 
 ## Boot flow
 
@@ -46,7 +52,7 @@ Save callback: `onPortalParamsSaved()` via `wm.setSaveParamsCallback()`.
 | BOOT hold 3 s | `wifiResetCredentialsAndReboot()` |
 | BOOT at power-on (documented in README) | Same wipe path |
 
-Wipe clears: WiFi creds, location (`services::location::clear()`), miles/runway prefs (`ui::radar::unitsReset()`). Range preset index is **not** reset.
+Wipe clears: WiFi creds, location and airport list (`core::settings::clearLocation()`), km/runway prefs (`core::settings::unitsReset()`). Range preset index is **not** reset.
 
 ## WiFi TX power
 
@@ -54,11 +60,13 @@ Wipe clears: WiFi creds, location (`services::location::clear()`), miles/runway 
 
 ## Adding a new portal field
 
-1. Add `WiFiManagerParameter` in `wifi_setup.cpp`
-2. Register in `attachPortalParams()` and `refreshPortalParamDefaults()`
-3. Persist in `onPortalParamsSaved()` — pick correct NVS namespace
-4. Include in credential wipe if it should reset with BOOT long-press
-5. Update README WiFi portal table
+1. Add a row to `kFields[]` in `src/core/portal_params.cpp`
+2. Handle `currentValue`, `htmlAttrs`, and `applyValue` for the new id
+3. Persist in `commit()` or immediately in `applyValue` (checkboxes)
+4. Bump `kMaxPortalFields` in `wifi_setup_device.cpp` if needed
+5. Update native `appendField()` in `portal_server.cpp` if the kind is new
+6. Include in credential wipe if it should reset with BOOT long-press
+7. Update README WiFi portal table
 
 ## Config constants
 
@@ -67,3 +75,4 @@ Portal names and timing in `include/config.h`:
 - `kPortalApName`, `kPortalIp`, `kPortalHostname` (`plane-radar`)
 - `kWifiConnectAttemptMs`, `kWifiConnectAttempts`
 - `kWifiDownGraceMs`, `kWifiReconnectIntervalMs`
+- `kDoubleTapWindowMs` (500 ms), `kAdsbMinRefetchMs` (1000 ms)

@@ -561,11 +561,41 @@ int scaleLabelAnchorX(int cx, int outer_radius) {
   return cx + outer_radius - radar::kScaleGapFromOuterRing;
 }
 
+int siteLabelAnchorX(int cx, int outer_radius) {
+  return cx - outer_radius + radar::kScaleGapFromOuterRing;
+}
+
 void drawScaleLabel(int cx, int cy, int outer_radius) {
   char scale_label[12];
   radar::formatCurrentRing3Label(scale_label, sizeof(scale_label));
   drawScaleLabelWithBackground(scale_label,
                                scaleLabelAnchorX(cx, outer_radius), cy);
+}
+
+void drawSiteLabelWithBackground(const char* text, int x, int y) {
+  applyScaleStyle();
+  s_draw->setTextDatum(textdatum_t::middle_left);
+
+  const int tw = s_draw->textWidth(text);
+  const int th = s_draw->fontHeight();
+  constexpr int kPadX = 3;
+  constexpr int kPadY = 2;
+
+  const int left = x - kPadX;
+  const int top = y - th / 2 - kPadY;
+
+  s_draw->fillRect(left, top, tw + kPadX * 2, th + kPadY * 2,
+                   radar::kColorBackground);
+  s_draw->setTextColor(radar::kColorGrid, radar::kColorBackground);
+  s_draw->drawString(text, x, y);
+}
+
+void drawSiteLabel(int cx, int cy, int outer_radius) {
+  const char* ident = core::settings::siteActiveIdent();
+  if (ident == nullptr || ident[0] == '\0') {
+    return;
+  }
+  drawSiteLabelWithBackground(ident, siteLabelAnchorX(cx, outer_radius), cy);
 }
 
 template <typename Gfx>
@@ -585,6 +615,7 @@ void drawStaticGrid(Gfx& gfx) {
   drawCenterDot(cx, cy);
   drawCardinalLabels();
   drawScaleLabel(cx, cy, grid_r);
+  drawSiteLabel(cx, cy, grid_r);
   gfx.setTextDatum(textdatum_t::top_left);
 }
 

@@ -33,6 +33,8 @@ constexpr unsigned long kWifiReconnectIntervalMs = 15000;
 constexpr unsigned long kBootResetHoldMs = 3000UL;
 /** Ignore BOOT taps shorter than this (debounce). */
 constexpr unsigned long kBootTapMinMs = 40UL;
+/** Second tap within this window counts as a double tap. */
+constexpr unsigned long kDoubleTapWindowMs = 500UL;
 
 // --- Display geometry (pins and bus settings in platform/device/pins.h) ---
 constexpr int kDisplayWidth = 240;
@@ -54,6 +56,8 @@ constexpr double kDefaultRadarLon = 15.4062;
 
 /** Poll adsb.fi (API public limit: 1 req/s). */
 constexpr unsigned long kAdsbFetchIntervalMs = 10000;
+/** Minimum gap after a manual site switch before the next adsb.fi request. */
+constexpr unsigned long kAdsbMinRefetchMs = 1000;
 /** false = hide aircraft with alt_baro "ground"; true = show them too. */
 constexpr bool kAdsbShowGroundAircraft = false;
 
