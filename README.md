@@ -248,9 +248,20 @@ make test               # all host unit tests
 - Serial: **115200** baud
 - USB CDC on boot enabled in `platformio.ini` for the Super Mini
 
+Flashing uses `upload_flags = --no-stub`. Over the ESP32-C3's built-in USB Serial/JTAG, esptool's flasher stub stops responding right after `Stub running...` and the upload dies with `Unable to verify flash chip connection`. The ROM loader takes about 40 s instead of 15 s, but it does not fail. `upload_speed` is pinned to 115200 for the same reason — the baud renegotiation is another failure point, and the nominal rate is meaningless over USB CDC anyway.
+
+`Failed to read MISA from hart 0` means the RISC-V debug module is wedged. It looks exactly like dead hardware, but the board is fine — and no reset clears it, because every reset available over USB leaves the chip powered. Only unplugging it does. Two things put it in that state, and both are avoided by the debug scripts:
+
+- **Flashing with esptool**, which drives the chip through ROM download mode. This is why the debug flow programs over JTAG instead. `make upload` and `make flash-release` still use esptool, so power-cycle the board once after either before starting a debug session.
+- **Ending a session with the CPU halted.** `scripts/device-stop.sh` resumes the target through OpenOCD's telnet console before shutting the server down, and `scripts/device-openocd.sh` calls it on `EXIT`, `INT` and `TERM` — `TERM` included because that is what VS Code sends when a task is stopped.
+
+A leftover OpenOCD also holds port 3333 and the USB interface, so `scripts/device-openocd.sh` clears any previous session before it starts.
+
 #### On-device debugging
 
-Debugging goes over the ESP32-C3's built-in USB JTAG — no extra probe, just the USB-C cable. `scripts/device-openocd.sh` flashes the debug firmware and serves GDB on port 3333; the Native Debug adapter attaches `riscv32-esp-elf-gdb` to it.
+Debugging goes over the ESP32-C3's built-in USB JTAG — no extra probe, just the USB-C cable. `scripts/device-openocd.sh` builds the debug firmware, writes all four images over JTAG with OpenOCD's `program_esp`, and then serves GDB on port 3333; the Native Debug adapter attaches `riscv32-esp-elf-gdb` to it.
+
+Readiness is signalled by a sentinel printed once programming has finished, not by OpenOCD's `Listening on port 3333` line — OpenOCD opens that port before it starts writing flash, so attaching on it would drop GDB into the middle of an upload. The script also treats a failed target examination as fatal and stops the server itself, because OpenOCD otherwise serves a target it cannot control and GDB reports only `Connection reset by peer`.
 
 `pio debug` is deliberately unused: PlatformIO Core 6.1.x drives its debug session through an asyncio pipe transport that raises `OSError: [Errno 22]` on Python 3.13+, which is the Python `make setup` installs. GDB would start but never attach to the target.
 

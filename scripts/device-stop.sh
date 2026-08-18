@@ -23,3 +23,12 @@ if command -v nc >/dev/null 2>&1; then
 fi
 
 pkill -f "$PATTERN" 2>/dev/null || true
+
+# A session that lost the USB endpoint spins inside libusb and never reaches its
+# signal handler, so SIGTERM alone can leave the port held for the next run.
+for _ in $(seq 1 10); do
+  pgrep -f "$PATTERN" >/dev/null 2>&1 || exit 0
+  sleep 0.3
+done
+
+pkill -9 -f "$PATTERN" 2>/dev/null || true

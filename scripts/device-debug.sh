@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
-# Attach GDB to the ESP32-C3 over its built-in USB JTAG.
+# Attach terminal GDB to the ESP32-C3 over its built-in USB JTAG.
+#
+# This is the plain-terminal counterpart to the "Device › …" launch
+# configurations, and backs `make debug-device-test` / `make debug-device-run`.
+# Handy when the VS Code debug adapter misbehaves or you want a raw GDB prompt.
 #
 # `pio debug` is deliberately not used: PlatformIO Core 6.1.x crashes on
 # Python 3.13+ (asyncio pipe transport), which is what `make setup` installs.
-# OpenOCD and the RISC-V GDB are driven directly instead.
+#
+# The server side is device-openocd.sh, which flashes over JTAG rather than with
+# esptool and resumes the target when it shuts down. Both matter: see the notes
+# in that script for why either one wedges the debug module otherwise.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -11,7 +18,7 @@ cd "$ROOT"
 
 PIOENV_DEBUG="supermini_debug"
 BREAK_AT=""
-DO_FLASH=1
+SERVER_ARGS=()
 
 usage() {
   cat <<'EOF'
@@ -26,76 +33,67 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --break) BREAK_AT="$2"; shift 2 ;;
-    --no-flash) DO_FLASH=0; shift ;;
+    --no-flash) SERVER_ARGS+=(--no-flash); shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
   esac
 done
 
 PIO_CORE="${PLATFORMIO_CORE_DIR:-$HOME/.platformio}"
-OPENOCD="${PIO_CORE}/packages/tool-openocd-esp32/bin/openocd"
-OPENOCD_SCRIPTS="${PIO_CORE}/packages/tool-openocd-esp32/share/openocd/scripts"
 GDB="${PIO_CORE}/packages/toolchain-riscv32-esp/bin/riscv32-esp-elf-gdb"
 ELF="${ROOT}/.pio/build/${PIOENV_DEBUG}/firmware.elf"
 
-if [[ -x "${ROOT}/.venv/bin/pio" ]]; then
-  PIO="${ROOT}/.venv/bin/pio"
-elif command -v pio >/dev/null 2>&1; then
-  PIO=pio
-else
-  echo "PlatformIO (pio) not found. Run: make setup" >&2
+if [[ ! -x "$GDB" ]]; then
+  echo "Missing debug tool: $GDB" >&2
+  echo "Run once to let PlatformIO install it:  pio pkg install -e ${PIOENV_DEBUG}" >&2
   exit 1
 fi
 
-if [[ "$DO_FLASH" -eq 1 ]]; then
-  "$PIO" run -e "$PIOENV_DEBUG" -t upload
-fi
-
-for tool in "$OPENOCD" "$GDB"; do
-  if [[ ! -x "$tool" ]]; then
-    echo "Missing debug tool: $tool" >&2
-    echo "Run once to let PlatformIO install it:  pio pkg install -e ${PIOENV_DEBUG}" >&2
-    exit 1
-  fi
-done
-
-if [[ ! -f "$ELF" ]]; then
-  echo "Debug firmware not built: $ELF" >&2
-  echo "Run: make build-debug" >&2
-  exit 1
-fi
-
-OPENOCD_LOG="$(mktemp -t plane-radar-openocd)"
-OPENOCD_PID=""
+SERVER_LOG="$(mktemp -t plane-radar-debug)"
+SERVER_PID=""
 
 cleanup() {
-  if [[ -n "$OPENOCD_PID" ]] && kill -0 "$OPENOCD_PID" 2>/dev/null; then
-    kill "$OPENOCD_PID" 2>/dev/null || true
-    wait "$OPENOCD_PID" 2>/dev/null || true
+  if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
+    # Terminating the server script runs its own trap, which resumes the target
+    # before OpenOCD exits.
+    kill -TERM "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
   fi
-  rm -f "$OPENOCD_LOG"
+  "${ROOT}/scripts/device-stop.sh" >/dev/null 2>&1 || true
+  rm -f "$SERVER_LOG"
 }
 trap cleanup EXIT INT TERM
 
-echo "==> Starting OpenOCD (ESP32-C3 built-in USB JTAG)"
-"$OPENOCD" -s "$OPENOCD_SCRIPTS" -f board/esp32c3-builtin.cfg >"$OPENOCD_LOG" 2>&1 &
-OPENOCD_PID=$!
+# Not a pipeline: $! has to be the server's own PID so that cleanup can signal
+# it and let its trap resume the target. The log stays hidden unless something
+# goes wrong, otherwise OpenOCD chatter would interleave with the GDB prompt.
+echo "==> Building, flashing over JTAG, and starting OpenOCD"
+# The +"${...}" guard keeps set -u happy on an empty array: macOS ships bash 3.2,
+# where a plain "${arr[@]}" expansion of an empty array is an unbound variable.
+"${ROOT}/scripts/device-openocd.sh" ${SERVER_ARGS[@]+"${SERVER_ARGS[@]}"} >"$SERVER_LOG" 2>&1 &
+SERVER_PID=$!
 
-for _ in $(seq 1 60); do
-  if grep -q "Listening on port 3333 for gdb connections" "$OPENOCD_LOG"; then
-    break
-  fi
-  if ! kill -0 "$OPENOCD_PID" 2>/dev/null; then
-    echo "OpenOCD exited before the GDB port was ready:" >&2
-    cat "$OPENOCD_LOG" >&2
+# device-openocd.sh prints nothing until it knows the board is usable, so this
+# line appearing means programming finished and the target was examined.
+for _ in $(seq 1 600); do
+  grep -qa "Listening on port 3333 for gdb connections" "$SERVER_LOG" && break
+  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo "OpenOCD did not come up:" >&2
+    cat "$SERVER_LOG" >&2
     exit 1
   fi
   sleep 0.5
 done
 
-if ! grep -q "Listening on port 3333 for gdb connections" "$OPENOCD_LOG"; then
-  echo "Timed out waiting for OpenOCD. Is another debug session running?" >&2
-  cat "$OPENOCD_LOG" >&2
+if ! grep -qa "Listening on port 3333 for gdb connections" "$SERVER_LOG"; then
+  echo "Timed out waiting for OpenOCD:" >&2
+  cat "$SERVER_LOG" >&2
+  exit 1
+fi
+
+if [[ ! -f "$ELF" ]]; then
+  echo "Debug firmware not built: $ELF" >&2
+  echo "Run: make build-debug" >&2
   exit 1
 fi
 

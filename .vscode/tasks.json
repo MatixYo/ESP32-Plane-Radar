@@ -95,7 +95,7 @@
       "label": "Device › OpenOCD server",
       "type": "shell",
       "command": "./scripts/device-openocd.sh",
-      "detail": "Flash debug firmware and serve GDB on :3333 (preLaunchTask for device debugging)",
+      "detail": "Flash debug firmware over JTAG and serve GDB on :3333 (preLaunchTask for device debugging)",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -103,7 +103,7 @@
       "problemMatcher": {
         "owner": "openocd",
         "pattern": {
-          "regexp": "^(.*)$",
+          "regexp": "^(OPENOCD_OUTPUT_IS_NOT_A_DIAGNOSTIC)$",
           "file": 1,
           "location": 1,
           "message": 1

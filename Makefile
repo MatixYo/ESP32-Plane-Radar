@@ -72,18 +72,18 @@ build: check ## Compile firmware (pio run)
 build-debug: check ## Compile debug firmware (-Og -g, supermini_debug)
 	@"$(PIO)" run -e supermini_debug
 
-upload-debug: check ## Flash debug firmware to the connected board
+upload-debug: check ## Flash debug firmware via esptool (power-cycle before debugging)
 	@"$(PIO)" run -t upload -e supermini_debug
 
-flash-debug: build-debug upload-debug ## Build and flash debug firmware
+flash-debug: build-debug upload-debug ## Build and flash debug firmware via esptool
 
 flash-release: check ## Build release firmware and flash to device
 	@"$(PIO)" run -e "$(PIOENV)" -t upload
 
-debug-device-test: check ## Flash debug firmware, attach GDB, halt at setup()
+debug-device-test: check ## Flash over JTAG, attach GDB, halt at setup()
 	@"$(ROOT)/scripts/device-debug.sh" --break setup
 
-debug-device-run: check ## Flash debug firmware, attach GDB, let the board run
+debug-device-run: check ## Flash over JTAG, attach GDB, let the board run
 	@"$(ROOT)/scripts/device-debug.sh"
 
 compiledb: check ## Refresh compile_commands.json and .clangd for IDE/clangd

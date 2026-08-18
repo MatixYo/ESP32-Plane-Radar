@@ -29,10 +29,6 @@
       "gdbpath": "${env:HOME}/.platformio/packages/toolchain-riscv32-esp/bin/riscv32-esp-elf-gdb",
       "preLaunchTask": "Device › OpenOCD server",
       "postDebugTask": "Device › Stop OpenOCD",
-      "autorun": [
-        "monitor reset halt",
-        "continue"
-      ],
       "valuesFormatting": "parseText"
     },
     {
@@ -46,11 +42,7 @@
       "gdbpath": "${env:HOME}/.platformio/packages/toolchain-riscv32-esp/bin/riscv32-esp-elf-gdb",
       "preLaunchTask": "Device › OpenOCD server",
       "postDebugTask": "Device › Stop OpenOCD",
-      "autorun": [
-        "monitor reset halt",
-        "thbreak setup",
-        "continue"
-      ],
+      "stopAtEntry": "setup",
       "valuesFormatting": "parseText"
     },
     {
