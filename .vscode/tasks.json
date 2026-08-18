@@ -1,37 +1,187 @@
 {
   "version": "2.0.0",
+  "inputs": [
+    {
+      "id": "testSuite",
+      "type": "pickString",
+      "description": "Which unit test suite to debug? (both write the same binary)",
+      "options": [
+        "test_geo",
+        "test_settings"
+      ],
+      "default": "test_settings"
+    }
+  ],
   "tasks": [
     {
-      "label": "Setup environment",
+      "label": "Emulator › Build",
       "type": "shell",
-      "command": "make setup",
+      "command": "make native-build",
+      "detail": "Compile native harness (debug symbols, -O0)",
       "options": {
         "cwd": "${workspaceFolder}"
       },
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "shared",
-        "focus": true
-      }
-    },
-    {
-      "label": "Check environment",
-      "type": "shell",
-      "command": "make check",
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": [],
+      "problemMatcher": "$gcc",
       "presentation": {
         "reveal": "always",
         "panel": "shared"
       }
     },
     {
-      "label": "Build firmware",
+      "label": "Emulator › Test: build",
       "type": "shell",
-      "command": "make build",
+      "command": "make test-build SUITE=${input:testSuite}",
+      "detail": "Compile one unit test suite without running it",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": "$gcc",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Emulator › Run",
+      "type": "shell",
+      "command": "make native",
+      "detail": "Build and run native harness (SDL window, no debugger)",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": "$gcc",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true,
+        "close": false
+      }
+    },
+    {
+      "label": "Emulator › Test",
+      "type": "shell",
+      "command": "make test",
+      "detail": "Run all host unit tests (no debugger)",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": "$gcc",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Emulator › Run with ASan",
+      "type": "shell",
+      "command": "make native-asan",
+      "detail": "Run native harness under AddressSanitizer/UBSan",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": "$gcc",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true,
+        "close": false
+      }
+    },
+    {
+      "label": "Device › OpenOCD server",
+      "type": "shell",
+      "command": "./scripts/device-openocd.sh",
+      "detail": "Flash debug firmware and serve GDB on :3333 (preLaunchTask for device debugging)",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "openocd",
+        "pattern": {
+          "regexp": "^(.*)$",
+          "file": 1,
+          "location": 1,
+          "message": 1
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^==> |^Processing |^Open On-Chip Debugger",
+          "endsPattern": "Listening on port 3333 for gdb connections"
+        }
+      },
+      "runOptions": {
+        "instanceLimit": 1
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": false,
+        "close": false
+      }
+    },
+    {
+      "label": "Device › Stop OpenOCD",
+      "type": "shell",
+      "command": "./scripts/device-stop.sh",
+      "detail": "Resume the CPU and release the JTAG interface after debugging",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared",
+        "close": true
+      }
+    },
+    {
+      "label": "Device › Test (debug, terminal GDB)",
+      "type": "shell",
+      "command": "make debug-device-test",
+      "detail": "Terminal GDB fallback: flash, attach, halt at setup()",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "runOptions": {
+        "instanceLimit": 1
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true,
+        "close": false
+      }
+    },
+    {
+      "label": "Device › Run (debug, terminal GDB)",
+      "type": "shell",
+      "command": "make debug-device-run",
+      "detail": "Terminal GDB fallback: flash, attach, board runs",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "runOptions": {
+        "instanceLimit": 1
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true,
+        "close": false
+      }
+    },
+    {
+      "label": "Device › Flash release",
+      "type": "shell",
+      "command": "make flash-release",
+      "detail": "Build release firmware and flash to the board",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -46,81 +196,98 @@
       }
     },
     {
-      "label": "Upload firmware",
-      "type": "shell",
-      "command": "make upload",
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "shared"
-      }
-    },
-    {
-      "label": "Build and upload",
-      "type": "shell",
-      "command": "make build upload",
-      "dependsOn": [],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": "$gcc",
-      "presentation": {
-        "reveal": "always",
-        "panel": "shared"
-      }
-    },
-    {
-      "label": "Serial monitor",
+      "label": "Device › Serial monitor",
       "type": "shell",
       "command": "make monitor",
+      "detail": "Serial log at 115200 baud",
       "options": {
         "cwd": "${workspaceFolder}"
       },
-      "problemMatcher": [],
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "serial",
+        "pattern": {
+          "regexp": "^.*$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "Terminal on"
+        }
+      },
+      "runOptions": {
+        "instanceLimit": 1
+      },
       "presentation": {
         "reveal": "always",
         "panel": "dedicated",
-        "focus": true
+        "focus": true,
+        "close": false
       }
     },
     {
-      "label": "Merge release binary",
-      "type": "shell",
-      "command": "make merge",
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "shared"
-      }
+      "label": "Device › Flash release + monitor",
+      "dependsOn": [
+        "Device › Flash release",
+        "Device › Serial monitor"
+      ],
+      "dependsOrder": "sequence",
+      "detail": "Flash release build, then open the serial monitor",
+      "problemMatcher": []
     },
     {
-      "label": "Clean build",
+      "label": "Release › Build + merge",
       "type": "shell",
-      "command": "make clean",
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "shared"
-      }
-    },
-    {
-      "label": "Rebuild firmware",
-      "type": "shell",
-      "command": "make rebuild",
+      "command": "make all",
+      "detail": "Release build plus merged web-flash binary",
       "options": {
         "cwd": "${workspaceFolder}"
       },
       "group": "build",
       "problemMatcher": "$gcc",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Setup environment",
+      "type": "shell",
+      "command": "make setup",
+      "detail": "Create .venv and install PlatformIO (first-time setup)",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": true
+      }
+    },
+    {
+      "label": "Refresh compile database",
+      "type": "shell",
+      "command": "make compiledb",
+      "detail": "Regenerate compile_commands.json for clangd",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Clean firmware build",
+      "type": "shell",
+      "command": "make clean",
+      "detail": "Remove .pio/build/supermini artifacts",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
       "presentation": {
         "reveal": "always",
         "panel": "shared"

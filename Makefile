@@ -27,7 +27,9 @@ else
 endif
 
 .PHONY: help setup check build upload monitor merge clean rebuild all \
-        native native-build native-clean native-asan check-sdl test
+        build-debug upload-debug flash-debug flash-release \
+        debug-device-test debug-device-run \
+        native native-build native-clean native-asan check-sdl test test-build compiledb
 
 .DEFAULT_GOAL := help
 
@@ -67,6 +69,27 @@ check: ## Verify Python venv and PlatformIO are available
 build: check ## Compile firmware (pio run)
 	@"$(PIO)" run -e "$(PIOENV)"
 
+build-debug: check ## Compile debug firmware (-Og -g, supermini_debug)
+	@"$(PIO)" run -e supermini_debug
+
+upload-debug: check ## Flash debug firmware to the connected board
+	@"$(PIO)" run -t upload -e supermini_debug
+
+flash-debug: build-debug upload-debug ## Build and flash debug firmware
+
+flash-release: check ## Build release firmware and flash to device
+	@"$(PIO)" run -e "$(PIOENV)" -t upload
+
+debug-device-test: check ## Flash debug firmware, attach GDB, halt at setup()
+	@"$(ROOT)/scripts/device-debug.sh" --break setup
+
+debug-device-run: check ## Flash debug firmware, attach GDB, let the board run
+	@"$(ROOT)/scripts/device-debug.sh"
+
+compiledb: check ## Refresh compile_commands.json and .clangd for IDE/clangd
+	@"$(ROOT)/scripts/generate-compiledb.sh"
+	@"$(ROOT)/scripts/generate-clangd.sh"
+
 upload: check ## Flash firmware to the connected board
 	@"$(PIO)" run -t upload -e "$(PIOENV)"
 
@@ -74,7 +97,7 @@ monitor: check ## Open serial monitor (115200 baud)
 	@"$(PIO)" device monitor -e "$(PIOENV)"
 
 merge: check ## Build merged web-flash image (release/plane-radar-merged.bin)
-	@"$(ROOT)/scripts/merge-firmware.sh --env "$(PIOENV)"
+	@"$(ROOT)/scripts/merge-firmware.sh" --env "$(PIOENV)"
 
 check-sdl: ## Verify SDL2 headers are installed (needed by the native harness)
 	@test -f /opt/homebrew/include/SDL2/SDL.h -o -f /usr/local/include/SDL2/SDL.h || { \
@@ -96,6 +119,9 @@ native-asan: check check-sdl ## Run the native harness under ASan/UBSan
 
 test: check ## Run host unit tests (no hardware needed)
 	@"$(PIO)" test -e native_test
+
+test-build: check ## Build host unit tests without running them (SUITE=test_geo picks one)
+	@"$(PIO)" test -e native_test --without-testing $(if $(SUITE),-f "$(SUITE)",)
 
 native-clean: ## Remove native build artifacts
 	@if test -x "$(PIO)"; then "$(PIO)" run -t clean -e native; \

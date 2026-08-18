@@ -65,6 +65,8 @@ shared with the firmware.
 
 Requires `brew install sdl2` (libcurl ships with macOS).
 
+Homebrew's `sdl2` is now **sdl2-compat**, which serves the SDL2 API from SDL3, and SDL3 enforces AppKit's rule that windows may only be touched from the main thread. `Panel_sdl::main()` owns that thread and runs `setup()`/`loop()` on a worker, so **any SDL window call made from shared code aborts the harness** with `NSWindow geometry should only be modified on the main thread!`. Configure the window before `tft.init()` — as `displayInit()` does for the title — so the setting is applied during `SDL_CreateWindow` on the main thread.
+
 | | Device | Native |
 |---|---|---|
 | Settings | NVS | `~/.plane-radar/settings.json` (`$PLANE_RADAR_SETTINGS` overrides) |
@@ -199,14 +201,67 @@ test/                      — host unit tests (pio test -e native_test)
 
 ## Build
 
+First-time setup on a machine:
+
 ```bash
-pio run -t upload
-pio device monitor
+make setup
+make build
 ```
 
-- PlatformIO env: **`supermini`**
+### VS Code / Cursor workflow
+
+Everything runs from **Run and Debug (F5)** — pick a configuration from the dropdown:
+
+| Configuration | What it does |
+|---------------|--------------|
+| **Emulator › Run (debug)** | Native SDL harness; breakpoints in `core/`, `ui/`, `main.cpp` |
+| **Emulator › Test (debug)** | One unit test suite; prompts for `test_geo` / `test_settings` |
+| **Device › Run (debug)** | Flash debug firmware, attach to the board, let it run |
+| **Device › Test (debug)** | Flash debug firmware, attach, halt at `setup()` |
+| **Device › Flash release** | Release build, flash to the board (no debugging) |
+
+Both test suites link to the same `.pio/build/native_test/program`, so the suite is picked at launch instead of debugging whichever happened to build last.
+
+The device configurations set clickable IDE breakpoints in the editor, same as the emulator ones. Each starts OpenOCD as a pre-launch step and shuts it down afterwards, so the JTAG interface is not left held.
+
+Extensions ([CodeLLDB](https://open-vsx.org/extension/vadimcn/vscode-lldb) for the emulator, [Native Debug](https://open-vsx.org/extension/webfreak/debug) for the board) are listed in `.vscode/extensions.json` and offered on first open.
+
+**Terminal → Run Task…** covers the non-debug work (**⇧⌘B** runs **Device › Flash release**):
+
+| Task | What it does |
+|------|--------------|
+| **Device › Flash release + monitor** | Flash release, then serial log |
+| **Emulator › Run / Test** | Harness or full test run, no debugger |
+| **Emulator › Run with ASan** | Harness under AddressSanitizer/UBSan |
+| **Release › Build + merge** | CI-parity release build + merged `.bin` |
+| **Device › … (debug, terminal GDB)** | Same device sessions as raw GDB, if the adapter misbehaves |
+
+```bash
+make flash-release      # release build + flash
+make debug-device-test  # on-device GDB, halt at setup()
+make debug-device-run   # on-device GDB, board runs
+make native             # emulator run
+make test               # all host unit tests
+```
+
+- PlatformIO envs: **`supermini`** (release), **`supermini_debug`** (`-Og -g`, on-device GDB), **`native`** / **`native_test`** (host)
 - Serial: **115200** baud
 - USB CDC on boot enabled in `platformio.ini` for the Super Mini
+
+#### On-device debugging
+
+Debugging goes over the ESP32-C3's built-in USB JTAG — no extra probe, just the USB-C cable. `scripts/device-openocd.sh` flashes the debug firmware and serves GDB on port 3333; the Native Debug adapter attaches `riscv32-esp-elf-gdb` to it.
+
+`pio debug` is deliberately unused: PlatformIO Core 6.1.x drives its debug session through an asyncio pipe transport that raises `OSError: [Errno 22]` on Python 3.13+, which is the Python `make setup` installs. GDB would start but never attach to the target.
+
+`scripts/device-debug.sh` runs the same session as plain terminal GDB, which is what `make debug-device-test` / `make debug-device-run` use. Handy when the adapter misbehaves or you want GDB commands directly:
+
+```
+break radar_display.cpp:120
+continue
+bt
+info locals
+```
 
 ### Web-flashable release image
 

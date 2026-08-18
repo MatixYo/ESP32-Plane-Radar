@@ -55,8 +55,8 @@ void handleBootButton() {
 
 void fetchAndDrawAircraft() {
   const float fetch_km = ui::radar::fetchRadiusKm();
-  if (!core::adsb::fetchUpdate(core::settings::lat(),
-                                   core::settings::lon(), fetch_km)) {
+  if (!core::adsb::fetchUpdate(core::settings::lat(), core::settings::lon(),
+                               fetch_km)) {
     handleBootButton();
     return;
   }

@@ -1,9 +1,11 @@
 .pio
 .venv/
+compile_commands.json
+.clangd
+.cache/
 release/
 # Native harness scratch (settings live in ~/.plane-radar/, not the repo)
 *.dSYM/
 .vscode/.browse.c_cpp.db*
 .vscode/c_cpp_properties.json
-.vscode/launch.json
 .vscode/ipch

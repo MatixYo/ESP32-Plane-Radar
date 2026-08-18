@@ -20,10 +20,14 @@ LGFX tft(config::kDisplayWidth, config::kDisplayHeight, kWindowScale,
          kWindowScale);
 
 void displayInit() {
-  tft.init();
-  // setWindowTitle lives on Panel_sdl, and lgfx::LGFX keeps its panel instance
-  // private, so reach it through the public getPanel().
+  // Title must be set before init(): with no window yet, Panel_sdl only records
+  // the string and SDL_CreateWindow applies it on the main thread. Setting it
+  // afterwards calls SDL_SetWindowTitle from this worker thread, which SDL3
+  // (via Homebrew's sdl2-compat) rejects — AppKit only allows window geometry
+  // changes on the main thread. setWindowTitle lives on Panel_sdl, and
+  // lgfx::LGFX keeps its panel instance private, so reach it through getPanel().
   static_cast<lgfx::Panel_sdl*>(tft.getPanel())->setWindowTitle("Plane Radar");
+  tft.init();
   tft.setRotation(0);
   // No setBrightness: there is no backlight to dim on an SDL window.
   tft.setTextWrap(false);
