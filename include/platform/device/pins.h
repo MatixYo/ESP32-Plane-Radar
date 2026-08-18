@@ -20,7 +20,9 @@ constexpr gpio_num_t kBootPin = GPIO_NUM_9;
 // --- Display: GC9A01 1.28" round 240x240 (SPI) ---
 constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_0;
 constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_1;
-constexpr gpio_num_t kDisplayPinDc = GPIO_NUM_10;
+// GPIO2 is an ESP32-C3 strapping pin: it must not be held LOW at reset. Safe
+// here because the panel's DC input is high-impedance and never drives it.
+constexpr gpio_num_t kDisplayPinDc = GPIO_NUM_2;
 constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_3;  // display SDA
 constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_4;  // display SCL
 

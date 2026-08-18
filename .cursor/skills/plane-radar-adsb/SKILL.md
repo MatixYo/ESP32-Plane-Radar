@@ -9,14 +9,15 @@ description: Work with the adsb.fi ADS-B client, aircraft parsing, fetch interva
 
 - Base: `https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/{nm}`
 - Radius passed in **nautical miles** (converted from km in `fetchUpdate`)
-- Public rate limit: ~1 req/s — respect `config::kAdsbFetchIntervalMs` (currently 3 s)
+- Public rate limit: ~1 req/s — respect `config::kAdsbFetchIntervalMs` (currently 10 s)
 
 ## Key files
 
 | File | Role |
 |------|------|
 | `include/core/adsb.h` | `Aircraft` struct, `kMaxAircraft = 64` |
-| `src/core/adsb.cpp` | HTTP fetch, JSON parse, aircraft buffer |
+| `src/core/adsb.cpp` | HTTP fetch, streaming JSON decode, aircraft buffer |
+| `include/core/platform.h` | `BodyReader` / `BodyFn` seam, `MemoryBodyReader` |
 | `src/main.cpp` | Poll interval, calls `fetchAndDrawAircraft()` |
 | `include/ui/radar_range.h` | `fetchRadiusKm()` for query radius |
 
@@ -48,10 +49,22 @@ Ground aircraft filtered when `config::kAdsbShowGroundAircraft == false` (defaul
 Long requests must not freeze WiFi portal or BOOT button:
 
 ```cpp
-services::adsb::setPollFn(wifiLoop);  // set once in setup()
+core::adsb::setPollFn(wifiLoop);  // set once in setup()
 ```
 
-`performGetWithPoll` and `readResponseBodyWithPoll` call the poll fn during I/O.
+`performGetWithPoll` and the body reader's refill both call the poll fn during I/O.
+
+## Streaming decode
+
+`HttpClient::get` hands the body to a `BodyFn` as a `BodyReader` instead of
+returning a `std::string`. Never buffer the whole reply: at the wider ranges it
+runs past what the device heap can hand out in one block, and the resulting
+`std::bad_alloc` aborts the firmware. `parseBody` walks the `"ac"` array one
+element at a time, so peak RAM is one aircraft-sized `JsonDocument`.
+
+- Device: reads the socket through a 512-byte window (`StreamBodyReader`)
+- Native: curl buffers, then replays through `MemoryBodyReader`
+- Framing is covered by `test/test_adsb/`
 
 ## Display integration
 

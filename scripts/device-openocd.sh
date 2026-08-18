@@ -23,6 +23,17 @@
 # libusb retry loop that writes megabytes per second of identical errors and
 # ignores SIGTERM. So run it under a supervisor: hold its output back until the
 # outcome is known, and kill it on the spot if the chip never came up.
+#
+# Three lines in a healthy session read like failures. "Failed to get flash maps"
+# comes before programming, when no valid app image is running to expose its
+# mapping table, and OpenOCD falls back to auto-detecting the 4 MB bank. "No
+# symbols for FreeRTOS!" is logged on the first thread query, just before the
+# qSymbol exchange with GDB completes — GDB does have symbols, it is started with
+# firmware.elf. "Too large number of threads" is the task counter read while the
+# chip sits halted at the reset vector (see "reset halt" below):
+# uxCurrentNumberOfTasks lives in .bss, which the startup code has not zeroed
+# yet, so OpenOCD sees garbage from the previous run. All three clear once the
+# target continues. Genuine failures are the FATAL_RE patterns below.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

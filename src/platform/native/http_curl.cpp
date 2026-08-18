@@ -82,9 +82,12 @@ class EasyHandle {
 
 }  // namespace
 
-bool HttpClient::get(const char* url, std::string* out,
-                     unsigned long timeout_ms, PollFn fn) {
-  out->clear();
+bool HttpClient::get(const char* url, BodyFn on_body, unsigned long timeout_ms,
+                     PollFn fn) {
+  // curl pushes the body at us through a write callback, so the host collects
+  // it and replays it to the decoder afterwards. The device streams instead,
+  // where holding tens of kilobytes is what runs the heap out; here it is free.
+  std::string body;
 
   ensureGlobalInit();
 
@@ -100,7 +103,7 @@ bool HttpClient::get(const char* url, std::string* out,
 
   curl_easy_setopt(curl, CURLOPT_URL, url);
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeToString);
-  curl_easy_setopt(curl, CURLOPT_WRITEDATA, out);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
   curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, timeout);
   curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, kConnectTimeoutMs);
@@ -119,8 +122,9 @@ bool HttpClient::get(const char* url, std::string* out,
 
   const CURLcode res = curl_easy_perform(curl);
   if (res != CURLE_OK) {
+    // A partial body is worse than none, so it is never handed on: the caller
+    // retries on the next cycle.
     logf("http: %s\n", curl_easy_strerror(res));
-    out->clear();  // A partial body is worse than none; the caller retries.
     return false;
   }
 
@@ -128,11 +132,11 @@ bool HttpClient::get(const char* url, std::string* out,
   curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
   if (status != 200) {
     logf("http: HTTP %ld\n", status);
-    out->clear();
     return false;
   }
 
-  return true;
+  MemoryBodyReader reader(body.data(), body.size());
+  return on_body(reader);
 }
 
 }  // namespace core::platform

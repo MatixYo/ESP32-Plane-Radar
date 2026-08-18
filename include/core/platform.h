@@ -111,9 +111,66 @@ struct KeyValueStore {
  */
 using PollFn = void (*)();
 
+/**
+ * Pull-based view of a response body.
+ *
+ * The body is never held in RAM as a whole: an adsb.fi reply is tens of
+ * kilobytes at the wider ranges, and a single allocation that size throws
+ * std::bad_alloc on the device, which aborts the firmware. read() and
+ * readBytes() have the signatures ArduinoJson's deserializer expects, so a
+ * reference to one of these can be passed straight to deserializeJson().
+ */
+struct BodyReader {
+  virtual ~BodyReader() = default;
+
+  /** Next byte, or -1 once the body is exhausted. */
+  virtual int read() = 0;
+
+  /** Fills up to `len` bytes; a short count means end of body. */
+  virtual size_t readBytes(char* buf, size_t len) = 0;
+};
+
+/** BodyReader over bytes already in RAM — the native transport and tests. */
+class MemoryBodyReader : public BodyReader {
+ public:
+  MemoryBodyReader(const char* data, size_t len) : data_(data), len_(len) {}
+
+  int read() override {
+    if (pos_ >= len_) {
+      return -1;
+    }
+    return static_cast<unsigned char>(data_[pos_++]);
+  }
+
+  size_t readBytes(char* buf, size_t len) override {
+    const size_t left = len_ - pos_;
+    const size_t n = len < left ? len : left;
+    for (size_t i = 0; i < n; ++i) {
+      buf[i] = data_[pos_++];
+    }
+    return n;
+  }
+
+ private:
+  const char* data_;
+  size_t len_;
+  size_t pos_ = 0;
+};
+
+/**
+ * Decodes a response body. Returning false marks the whole request failed.
+ *
+ * It runs while the connection is still open, so it must not block longer than
+ * the request timeout allows.
+ */
+using BodyFn = bool (*)(BodyReader& body);
+
 struct HttpClient {
-  /** Blocking GET of the whole body. Returns false on any transport error. */
-  static bool get(const char* url, std::string* out, unsigned long timeout_ms,
+  /**
+   * Blocking GET that hands the body to `on_body` as it arrives. Returns false
+   * on any transport error, on a non-200 status, or if `on_body` does.
+   */
+  static bool get(const char* url, BodyFn on_body, unsigned long timeout_ms,
                   PollFn poll);
 };
 
