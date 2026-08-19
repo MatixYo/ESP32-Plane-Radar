@@ -30,6 +30,8 @@ constexpr Field kFields[] = {
      Kind::kCheckbox, 2, true},
     {"show_runways", "Show airport runways", "type=\"checkbox\"",
      Kind::kCheckbox, 2, true},
+    {"show_terrain", "Show terrain", "type=\"checkbox\"", Kind::kCheckbox, 2,
+     true},
 };
 
 char s_pending_lat[kCoordLen + 1] = "";
@@ -86,6 +88,8 @@ void htmlAttrs(const Field& field, char* buf, size_t len) {
       on = settings::useKm();
     } else if (isField(field, "show_runways")) {
       on = settings::showRunways();
+    } else if (isField(field, "show_terrain")) {
+      on = settings::showTerrain();
     }
     snprintf(buf, len, "%s%s", field.html_attrs, on ? " checked" : "");
     return;
@@ -114,6 +118,8 @@ void applyValue(const Field& field, const char* value) {
     settings::saveKmFromPortal(value);
   } else if (isField(field, "show_runways")) {
     settings::saveRunwaysFromPortal(value);
+  } else if (isField(field, "show_terrain")) {
+    settings::saveTerrainFromPortal(value);
   }
 }
 

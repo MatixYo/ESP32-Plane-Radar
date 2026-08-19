@@ -61,7 +61,7 @@ constexpr size_t kRangePresetCount =
  * every already-configured device on the next firmware update.
  */
 constexpr char kNsLocation[] = "radar";     ///< keys: lat, lon
-constexpr char kNsRadar[] = "planeradar";   ///< keys: rangeIdx, useKm, showRwys, sites, siteIdx
+constexpr char kNsRadar[] = "planeradar";   ///< keys: rangeIdx, useKm, showRwys, showTerr, sites, siteIdx
 
 constexpr size_t kMaxSites = 6;
 
@@ -103,13 +103,15 @@ uint8_t rangeIndex();
 /** False (the default) means nautical miles. */
 bool useKm();
 bool showRunways();
+bool showTerrain();
 
 /** Apply a WiFi portal checkbox value and persist it. */
 void saveKmFromPortal(const char* checkbox_value);
 void saveRunwaysFromPortal(const char* checkbox_value);
+void saveTerrainFromPortal(const char* checkbox_value);
 
 /**
- * Reset units and the runway overlay to their defaults.
+ * Reset units and the runway/terrain overlays to their defaults.
  *
  * Note the asymmetry with clearLocation(): this deliberately does NOT reset the
  * range preset. A Wi-Fi credential wipe returns the display to km and runways

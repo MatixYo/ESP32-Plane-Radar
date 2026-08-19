@@ -16,6 +16,7 @@
 #include "ui/radar_range.h"
 #include "ui/radar_theme.h"
 #include "ui/runway_overlay.h"
+#include "ui/terrain_overlay.h"
 
 namespace ui {
 namespace radar {
@@ -30,6 +31,7 @@ uint16_t kColorTagType = 0x5DFF;
 uint16_t kColorTagAltitude = 0xFFE0;
 uint16_t kColorRunway = 0x4D5F;
 uint16_t kColorRunwayLabel = 0x7DFF;
+uint16_t kColorTerrain[kTerrainBandCount] = {};
 
 }  // namespace radar
 
@@ -197,6 +199,10 @@ void initPalette() {
       tft.color565(radar::kRunwayR, radar::kRunwayG, radar::kRunwayB);
   radar::kColorRunwayLabel = tft.color565(radar::kRunwayLabelR, radar::kRunwayLabelG,
                                           radar::kRunwayLabelB);
+  for (int i = 0; i < radar::kTerrainBandCount; ++i) {
+    radar::kColorTerrain[i] = tft.color565(
+        radar::kTerrainBandR[i], radar::kTerrainBandG[i], radar::kTerrainBandB[i]);
+  }
 }
 
 /** Current view, rebuilt on demand from the live location and range preset. */
@@ -608,6 +614,7 @@ void drawStaticGrid(Gfx& gfx) {
   const int grid_r = radar::kGridOuterRadius;
 
   gfx.fillScreen(radar::kColorBackground);
+  terrain::drawTerrainBackground(gfx);
   drawRings(cx, cy, grid_r);
   drawCrosshairs(cx, cy, grid_r, radar::kColorGrid);
   initPalette();
@@ -672,6 +679,18 @@ void radarDisplayRefreshAircraft() {
   }
 
   radarDisplayDraw();
+}
+
+uint8_t* radarDisplayFrameScratch(size_t need_bytes) {
+  if (!ensureFrameSprite()) {
+    return nullptr;
+  }
+  constexpr size_t kFrameBytes =
+      static_cast<size_t>(radar::kSize) * radar::kSize * 2;
+  if (need_bytes > kFrameBytes) {
+    return nullptr;
+  }
+  return static_cast<uint8_t*>(s_frame.getBuffer());
 }
 
 }  // namespace ui

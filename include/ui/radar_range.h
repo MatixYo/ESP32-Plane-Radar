@@ -35,12 +35,16 @@ inline uint8_t rangeIndex() { return core::settings::rangeIndex(); }
 
 inline bool useKm() { return core::settings::useKm(); }
 inline bool showRunways() { return core::settings::showRunways(); }
+inline bool showTerrain() { return core::settings::showTerrain(); }
 
 inline void saveKmFromPortal(const char* v) {
   core::settings::saveKmFromPortal(v);
 }
 inline void saveRunwaysFromPortal(const char* v) {
   core::settings::saveRunwaysFromPortal(v);
+}
+inline void saveTerrainFromPortal(const char* v) {
+  core::settings::saveTerrainFromPortal(v);
 }
 inline void unitsReset() { core::settings::unitsReset(); }
 
@@ -61,6 +65,17 @@ inline float fetchRadiusKm() {
   const float screen_r_px =
       static_cast<float>(kCenterX - kBeyondRingScreenMarginPx);
   return outer_km * (screen_r_px / static_cast<float>(kGridOuterRadius));
+}
+
+/**
+ * Ground distance (km) from the screen centre to the screen edge — the
+ * half-span of the terrain elevation grid, which covers the whole square
+ * frame rather than just the outer ring.
+ */
+inline float terrainHalfSpanKm() {
+  const float outer_km = rangeCurrent().outer_km;
+  return outer_km *
+         (static_cast<float>(kCenterX) / static_cast<float>(kGridOuterRadius));
 }
 
 }  // namespace ui::radar

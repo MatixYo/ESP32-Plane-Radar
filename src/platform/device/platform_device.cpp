@@ -3,6 +3,7 @@
 #include "core/platform.h"
 
 #include <Arduino.h>
+#include <esp_heap_caps.h>
 #include <esp_system.h>
 
 #include <cstdarg>

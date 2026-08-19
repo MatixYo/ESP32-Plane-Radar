@@ -29,7 +29,7 @@ endif
 .PHONY: help setup check build upload monitor merge clean rebuild all \
         build-debug upload-debug flash-debug flash-release \
         debug-device-test debug-device-run \
-        native native-build native-clean native-asan check-sdl test test-build compiledb
+        native native-build native-clean native-asan check-sdl test test-live test-build compiledb
 
 .DEFAULT_GOAL := help
 
@@ -119,6 +119,11 @@ native-asan: check check-sdl ## Run the native harness under ASan/UBSan
 
 test: check ## Run host unit tests (no hardware needed)
 	@"$(PIO)" test -e native_test
+	@"$(PIO)" test -e native_test_fetch
+	@"$(PIO)" test -e native_test_png
+
+test-live: check ## Live terrain test: real tiles, real PNG decoder (~10s, needs internet)
+	@"$(PIO)" test -e native_test_live
 
 test-build: check ## Build host unit tests without running them (SUITE=test_geo picks one)
 	@"$(PIO)" test -e native_test --without-testing $(if $(SUITE),-f "$(SUITE)",)

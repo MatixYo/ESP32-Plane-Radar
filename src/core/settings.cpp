@@ -23,6 +23,7 @@ constexpr char kKeyRange[] = "rangeIdx";
  */
 constexpr char kKeyKm[] = "useKm";
 constexpr char kKeyRunways[] = "showRwys";
+constexpr char kKeyTerrain[] = "showTerr";
 constexpr char kKeySites[] = "sites";
 constexpr char kKeySiteIdx[] = "siteIdx";
 
@@ -33,6 +34,7 @@ double s_lon = config::kDefaultRadarLon;
 uint8_t s_range_index = kDefaultRangeIndex;
 bool s_use_km = false;  // default is nautical miles
 bool s_show_runways = true;
+bool s_show_terrain = true;
 
 char s_site_idents[kMaxSites][5] = {};
 size_t s_site_count = 0;
@@ -155,6 +157,7 @@ void init() {
   s_range_index = (saved < kRangePresetCount) ? saved : kDefaultRangeIndex;
   s_use_km = KV::getBool(kNsRadar, kKeyKm, false);
   s_show_runways = KV::getBool(kNsRadar, kKeyRunways, true);
+  s_show_terrain = KV::getBool(kNsRadar, kKeyTerrain, true);
 
   loadSitesFromStorage();
   applyActiveSiteCoords();
@@ -303,6 +306,8 @@ bool useKm() { return s_use_km; }
 
 bool showRunways() { return s_show_runways; }
 
+bool showTerrain() { return s_show_terrain; }
+
 void saveKmFromPortal(const char* checkbox_value) {
   s_use_km = portalCheckboxChecked(checkbox_value);
   KV::putBool(kNsRadar, kKeyKm, s_use_km);
@@ -315,11 +320,19 @@ void saveRunwaysFromPortal(const char* checkbox_value) {
   platform::logf("Runway overlay: %s\n", s_show_runways ? "on" : "off");
 }
 
+void saveTerrainFromPortal(const char* checkbox_value) {
+  s_show_terrain = portalCheckboxChecked(checkbox_value);
+  KV::putBool(kNsRadar, kKeyTerrain, s_show_terrain);
+  platform::logf("Terrain layer: %s\n", s_show_terrain ? "on" : "off");
+}
+
 void unitsReset() {
   s_use_km = false;
   s_show_runways = true;
+  s_show_terrain = true;
   KV::remove(kNsRadar, kKeyKm);
   KV::remove(kNsRadar, kKeyRunways);
+  KV::remove(kNsRadar, kKeyTerrain);
   // rangeIdx is intentionally left alone; see the header.
 }
 
