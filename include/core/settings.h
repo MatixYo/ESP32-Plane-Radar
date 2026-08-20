@@ -9,8 +9,9 @@
  * core::platform::KeyValueStore, so the device keeps using NVS and the native
  * harness uses a file.
  *
- * The two NVS namespaces are deliberately NOT merged — see kNsLocation /
- * kNsRadar below.
+ * The radar centre has a single source: the airport site list. The list is
+ * never empty — config::kDefaultSiteIdent is seeded into slot 0 whenever
+ * storage yields nothing — so lat()/lon() always name a real airport.
  */
 
 #include <cstddef>
@@ -55,12 +56,12 @@ constexpr size_t kRangePresetCount =
     sizeof(kRangePresets) / sizeof(kRangePresets[0]);
 
 /**
- * Storage namespaces. These stay separate: on the device they are distinct NVS
- * namespaces, and wifi_setup.cpp documents that merging them risks NVS handle
- * conflicts. The key names are equally frozen — changing either would strand
- * every already-configured device on the next firmware update.
+ * Storage namespace. The name and its keys are frozen — changing either would
+ * strand every already-configured device on the next firmware update.
+ *
+ * Devices flashed before the manual coordinates were removed still carry an
+ * orphaned "radar" namespace holding lat/lon. Nothing reads it.
  */
-constexpr char kNsLocation[] = "radar";     ///< keys: lat, lon
 constexpr char kNsRadar[] = "planeradar";   ///< keys: rangeIdx, useKm, showRwys, showTerr, sites, siteIdx
 
 constexpr size_t kMaxSites = 6;
@@ -75,10 +76,7 @@ void init();
 double lat();
 double lon();
 
-/** Parse portal strings, validate, persist, and update the runtime values. */
-bool saveLocationFromStrings(const char* lat_str, const char* lon_str);
-
-/** Clear stored coordinates and revert to the config defaults. */
+/** Drop the stored site list and revert to config::kDefaultSiteIdent. */
 void clearLocation();
 
 // --- Airport site list -------------------------------------------------------
@@ -113,19 +111,14 @@ void saveTerrainFromPortal(const char* checkbox_value);
 /**
  * Reset units and the runway/terrain overlays to their defaults.
  *
- * Note the asymmetry with clearLocation(): this deliberately does NOT reset the
- * range preset. A Wi-Fi credential wipe returns the display to km and runways
- * on, but leaves the user's chosen zoom alone.
+ * Note the asymmetry with clearLocation(), which resets the site list outright:
+ * this deliberately does NOT reset the range preset. A Wi-Fi credential wipe
+ * returns the display to NM with runways and terrain on, but leaves the user's
+ * chosen zoom alone.
  */
 void unitsReset();
 
 // --- Pure helpers (exposed for unit testing) ---------------------------------
-
-/** Strict strtod: rejects trailing garbage and empty input. */
-bool parseCoord(const char* text, double* out);
-
-/** Latitude within +/-90 and longitude within +/-180. */
-bool validLatLon(double lat, double lon);
 
 /**
  * Interpret a WiFiManager checkbox submission.

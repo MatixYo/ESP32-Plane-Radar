@@ -42,8 +42,7 @@ The same portal runs on the setup AP and on the device’s LAN IP while connecte
 
 | Field | Purpose |
 |-------|---------|
-| **Airport 1–6 (ICAO)** | Up to six large airports to cycle with a double tap (e.g. `LOWG`, `LOWW`); leave unused slots blank |
-| **Latitude / Longitude** | Radar center fallback when no airport list is set, and manual override stored in NVS |
+| **Airport 1–6 (ICAO)** | Up to six large airports to cycle with a double tap (e.g. `LOWG`, `LOWW`); leave unused slots blank. Blanking all six restores the default airport (`kDefaultSiteIdent`) |
 | **Display distances in km** | Ring scale label in **km** instead of the default **NM** (e.g. `74km` vs `40NM`) |
 | **Show airport runways** | Major-airport runway overlay on the radar (off to hide) |
 | **Show terrain** | Green elevation shading under the radar grid (default: on; off keeps the plain background) |
@@ -171,7 +170,7 @@ Edit **`include/config.h`** for hardware and behavior:
 | Wi‑Fi timing | connect attempts, reconnect grace, portal timeout (`0` = no timeout) |
 | BOOT | `kBootPin`, `kBootResetHoldMs`, `kBootTapMinMs` |
 | Display SPI | pins, `kDisplayInvert`, `kDisplayRgbOrder`, `kDisplaySpiWriteHz` |
-| Default location | `kDefaultRadarLat`, `kDefaultRadarLon` (until portal overrides) |
+| Default location | `kDefaultSiteIdent` (ICAO seeded when the airport list is empty) |
 | ADS-B | `kAdsbFetchIntervalMs`, `kAdsbShowGroundAircraft` |
 | Terrain | `kTerrainGridSize`, `kTerrainTileUrlFmt`, `kTerrainRequestTimeoutMs`, `kTerrainTileIntervalMs`, `kTerrainRetryIntervalMs` |
 

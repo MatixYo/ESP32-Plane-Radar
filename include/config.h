@@ -13,11 +13,10 @@
 namespace config {
 
 // --- Wi-Fi portal ---
-constexpr char kPortalApName[] = "PlaneRadar-Setup";
+constexpr char kPortalApName[] = "AbsoluteRadar-Setup";
 constexpr char kPortalIp[] = "192.168.4.1";
-/** mDNS host (no ".local" suffix); browser: http://plane-radar.local */
-constexpr char kPortalHostname[] = "plane-radar";
-constexpr char kPortalHostUrl[] = "plane-radar.local";
+constexpr char kPortalHostname[] = "absolute-radar";
+constexpr char kPortalHostUrl[] = "absolute-radar.local";
 
 /** Per-attempt STA connect wait (ms); retried kWifiConnectAttempts times. */
 constexpr unsigned long kWifiConnectAttemptMs = 15000;
@@ -50,9 +49,13 @@ constexpr int kDisplayHeight = 240;
  */
 constexpr bool kDisplayRgbOrder = true;
 
-// --- Radar center defaults (overridden via WiFi setup portal) ---
-constexpr double kDefaultRadarLat = 47.0753;
-constexpr double kDefaultRadarLon = 15.4062;
+// --- Radar center ---
+/**
+ * Airport seeded into slot 0 whenever the site list would otherwise be empty,
+ * which is what keeps the list non-empty and the centre always resolvable.
+ * Must exist in the generated data::large_airports table.
+ */
+constexpr char kDefaultSiteIdent[] = "LOWG";
 
 // --- Terrain layer (elevation background) ---
 /**

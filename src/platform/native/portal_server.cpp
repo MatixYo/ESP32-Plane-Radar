@@ -424,8 +424,8 @@ void applySubmission(const std::vector<FormPair>& pairs) {
     }
   }
 
-  // Exactly once per submission: lat/lon are staged during apply and only
-  // become persistent here, as a validated pair.
+  // Exactly once per submission: the airport slots are staged during apply and
+  // only become persistent here, as a whole list.
   core::portal::commit();
 }
 

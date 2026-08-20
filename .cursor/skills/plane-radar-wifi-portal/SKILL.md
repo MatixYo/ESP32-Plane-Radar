@@ -21,22 +21,20 @@ Defined once in `src/core/portal_params.cpp` (rendered by device WiFiManager and
 | Parameter ID | Label | Saved by |
 |--------------|-------|----------|
 | `site_1` … `site_6` | Airport N (ICAO) | `core::settings::saveSites()` |
-| `radar_lat` | Latitude (deg) | `core::settings::saveLocationFromStrings()` |
-| `radar_lon` | Longitude (deg) | `core::settings::saveLocationFromStrings()` |
 | `use_km` | Display distances in km | `core::settings::saveKmFromPortal()` |
 | `show_runways` | Show airport runways | `core::settings::saveRunwaysFromPortal()` |
 
-All six airport slots are always visible; leave unused ones blank.
+All six airport slots are always visible; leave unused ones blank. Blanking all
+six re-seeds `config::kDefaultSiteIdent`, so the list is never empty.
 
 Save callback: `onPortalParamsSaved()` → `core::portal::commit()` via `wm.setSaveParamsCallback()`.
 
 ## NVS for portal state
 
 - Namespace `wifi`, key `portal` — forces setup screen on next boot after credential wipe
-- Namespace `radar`: `lat`, `lon` — manual centre fallback
 - Namespace `planeradar`: `rangeIdx`, `useKm`, `showRwys`, `sites` (comma-separated ICAO), `siteIdx`
 
-When `sites` is non-empty, `core::settings::lat()`/`lon()` resolve from the active airport ident via `core::airport::findAirport()`.
+`core::settings::lat()`/`lon()` always resolve from the active airport ident via `core::airport::findAirport()`. Devices flashed before the manual coordinates were removed still hold an orphaned `radar` namespace with `lat`/`lon`; nothing reads it.
 
 ## Boot flow
 
@@ -52,7 +50,7 @@ When `sites` is non-empty, `core::settings::lat()`/`lon()` resolve from the acti
 | BOOT hold 3 s | `wifiResetCredentialsAndReboot()` |
 | BOOT at power-on (documented in README) | Same wipe path |
 
-Wipe clears: WiFi creds, location and airport list (`core::settings::clearLocation()`), km/runway prefs (`core::settings::unitsReset()`). Range preset index is **not** reset.
+Wipe clears: WiFi creds, the airport list — back to `config::kDefaultSiteIdent` (`core::settings::clearLocation()`) — and km/runway/terrain prefs (`core::settings::unitsReset()`). Range preset index is **not** reset.
 
 ## WiFi TX power
 

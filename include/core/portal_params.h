@@ -13,7 +13,6 @@
 namespace core::portal {
 
 enum class Kind {
-  kNumber,    ///< free-text numeric input
   kText,      ///< plain text (ICAO codes)
   kCheckbox,  ///< see core::settings::portalCheckboxChecked for the quirk
 };
@@ -33,7 +32,7 @@ size_t fieldCount();
 /**
  * Current value for prefilling the form.
  *
- * Numbers return their formatted value. Checkboxes always return "T" — their
+ * Text fields return their stored value. Checkboxes always return "T" — their
  * state is carried by the `checked` attribute from fieldHtmlAttrs(), which is
  * how WiFiManager expects it.
  */
@@ -62,9 +61,9 @@ bool applyValueById(const char* id, const char* value);
 /**
  * Commit a form submission.
  *
- * Call after feeding every field through applyValue(): the latitude and
- * longitude inputs are only meaningful as a pair, so they are staged during
- * apply and persisted here.
+ * Call after feeding every field through applyValue(): the airport slots are
+ * only meaningful as a whole list, so they are staged during apply and
+ * persisted here. Blanking every slot restores config::kDefaultSiteIdent.
  */
 void commit();
 

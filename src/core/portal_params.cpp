@@ -3,15 +3,12 @@
 #include <cstdio>
 #include <cstring>
 
-#include "core/platform.h"
 #include "core/settings.h"
 
 namespace core::portal {
 
 namespace {
 
-constexpr int kCoordLen = 20;
-constexpr char kCoordAttrs[] = " type=\"number\" step=\"0.000001\"";
 constexpr char kSiteTextAttrs[] =
     " type=\"text\" maxlength=\"4\" autocapitalize=\"characters\"";
 
@@ -22,10 +19,6 @@ constexpr Field kFields[] = {
     {"site_4", "Airport 4 (ICAO)", kSiteTextAttrs, Kind::kText, 5, false},
     {"site_5", "Airport 5 (ICAO)", kSiteTextAttrs, Kind::kText, 5, false},
     {"site_6", "Airport 6 (ICAO)", kSiteTextAttrs, Kind::kText, 5, false},
-    {"radar_lat", "Latitude (deg)", kCoordAttrs, Kind::kNumber, kCoordLen,
-     false},
-    {"radar_lon", "Longitude (deg)", kCoordAttrs, Kind::kNumber, kCoordLen,
-     false},
     {"use_km", "Display distances in km", "type=\"checkbox\"",
      Kind::kCheckbox, 2, true},
     {"show_runways", "Show airport runways", "type=\"checkbox\"",
@@ -34,8 +27,6 @@ constexpr Field kFields[] = {
      true},
 };
 
-char s_pending_lat[kCoordLen + 1] = "";
-char s_pending_lon[kCoordLen + 1] = "";
 char s_pending_sites[settings::kMaxSites][6] = {};
 
 bool isField(const Field& f, const char* id) {
@@ -69,13 +60,7 @@ void currentValue(const Field& field, char* buf, size_t len) {
     snprintf(buf, len, "%s", settings::siteSlotIdent(siteFieldSlot(field)));
     return;
   }
-  if (isField(field, "radar_lat")) {
-    snprintf(buf, len, "%.6f", settings::lat());
-  } else if (isField(field, "radar_lon")) {
-    snprintf(buf, len, "%.6f", settings::lon());
-  } else {
-    buf[0] = '\0';
-  }
+  buf[0] = '\0';
 }
 
 void htmlAttrs(const Field& field, char* buf, size_t len) {
@@ -106,15 +91,7 @@ void applyValue(const Field& field, const char* value) {
     s_pending_sites[slot][sizeof(s_pending_sites[slot]) - 1] = '\0';
     return;
   }
-  if (isField(field, "radar_lat")) {
-    strncpy(s_pending_lat, value != nullptr ? value : "",
-            sizeof(s_pending_lat) - 1);
-    s_pending_lat[sizeof(s_pending_lat) - 1] = '\0';
-  } else if (isField(field, "radar_lon")) {
-    strncpy(s_pending_lon, value != nullptr ? value : "",
-            sizeof(s_pending_lon) - 1);
-    s_pending_lon[sizeof(s_pending_lon) - 1] = '\0';
-  } else if (isField(field, "use_km")) {
+  if (isField(field, "use_km")) {
     settings::saveKmFromPortal(value);
   } else if (isField(field, "show_runways")) {
     settings::saveRunwaysFromPortal(value);
@@ -146,13 +123,6 @@ void commit() {
   }
   settings::saveSites(idents, n);
 
-  if (!settings::saveLocationFromStrings(s_pending_lat, s_pending_lon)) {
-    platform::logf(
-        "Invalid lat/lon in portal — keeping previous location\n");
-  }
-
-  s_pending_lat[0] = '\0';
-  s_pending_lon[0] = '\0';
   for (size_t i = 0; i < settings::kMaxSites; ++i) {
     s_pending_sites[i][0] = '\0';
   }

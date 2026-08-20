@@ -2,7 +2,6 @@
 
 #include <cmath>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 
 #include "config.h"
@@ -13,8 +12,6 @@ namespace core::settings {
 
 namespace {
 
-constexpr char kKeyLat[] = "lat";
-constexpr char kKeyLon[] = "lon";
 constexpr char kKeyRange[] = "rangeIdx";
 /**
  * Deliberately not the old "useMiles" key. That one meant km-vs-statute-miles;
@@ -29,8 +26,10 @@ constexpr char kKeySiteIdx[] = "siteIdx";
 
 constexpr uint8_t kDefaultRangeIndex = 1;  // 40 NM ring
 
-double s_lat = config::kDefaultRadarLat;
-double s_lon = config::kDefaultRadarLon;
+// Resolved from the active site ident in init(); an ident lookup is not
+// constant-expression material, so these start at 0 rather than at a default.
+double s_lat = 0.0;
+double s_lon = 0.0;
 uint8_t s_range_index = kDefaultRangeIndex;
 bool s_use_km = false;  // default is nautical miles
 bool s_show_runways = true;
@@ -41,6 +40,11 @@ size_t s_site_count = 0;
 uint8_t s_site_index = 0;
 
 using KV = platform::KeyValueStore;
+
+/** Latitude within +/-90 and longitude within +/-180. */
+bool validLatLon(double lat_v, double lon_v) {
+  return lat_v >= -90.0 && lat_v <= 90.0 && lon_v >= -180.0 && lon_v <= 180.0;
+}
 
 void airportToDegrees(const data::large_airports::Airport& ap, double* lat,
                       double* lon) {
@@ -68,10 +72,31 @@ void persistSitesString() {
   KV::putString(kNsRadar, kKeySites, buf);
 }
 
-void applyActiveSiteCoords() {
-  if (s_site_count == 0) {
-    return;
+/**
+ * Reset the list to the single compile-time default site.
+ *
+ * config::kDefaultSiteIdent is only matched against the generated airport table
+ * at runtime, so a typo there — or a dataset regeneration that drops the
+ * ident — would otherwise leave the centre at 0/0. Falling back to the table's
+ * first entry keeps the centre resolvable.
+ */
+void seedDefaultSite() {
+  data::large_airports::Airport ap{};
+  if (!core::airport::findAirport(config::kDefaultSiteIdent, &ap)) {
+    ap = data::large_airports::kAirports[0];
+    platform::logf("Default site %s missing from airport data; using %s\n",
+                   config::kDefaultSiteIdent, ap.ident);
   }
+
+  memcpy(s_site_idents[0], ap.ident, sizeof(s_site_idents[0]));
+  for (size_t i = 1; i < kMaxSites; ++i) {
+    s_site_idents[i][0] = '\0';
+  }
+  s_site_count = 1;
+  s_site_index = 0;
+}
+
+void applyActiveSiteCoords() {
   if (s_site_index >= s_site_count) {
     s_site_index = 0;
   }
@@ -80,7 +105,16 @@ void applyActiveSiteCoords() {
   if (!core::airport::findAirport(s_site_idents[s_site_index], &ap)) {
     return;
   }
-  airportToDegrees(ap, &s_lat, &s_lon);
+  double lat_v = 0.0;
+  double lon_v = 0.0;
+  airportToDegrees(ap, &lat_v, &lon_v);
+  if (!validLatLon(lat_v, lon_v)) {
+    platform::logf("Airport %s has out-of-range coordinates; centre kept\n",
+                   ap.ident);
+    return;
+  }
+  s_lat = lat_v;
+  s_lon = lon_v;
 }
 
 void loadSitesFromStorage() {
@@ -142,17 +176,6 @@ void loadSitesFromStorage() {
 // --- Lifecycle ---------------------------------------------------------------
 
 void init() {
-  if (KV::has(kNsLocation, kKeyLat) && KV::has(kNsLocation, kKeyLon)) {
-    const double lat_v =
-        KV::getDouble(kNsLocation, kKeyLat, config::kDefaultRadarLat);
-    const double lon_v =
-        KV::getDouble(kNsLocation, kKeyLon, config::kDefaultRadarLon);
-    if (validLatLon(lat_v, lon_v)) {
-      s_lat = lat_v;
-      s_lon = lon_v;
-    }
-  }
-
   const uint8_t saved = KV::getU8(kNsRadar, kKeyRange, kDefaultRangeIndex);
   s_range_index = (saved < kRangePresetCount) ? saved : kDefaultRangeIndex;
   s_use_km = KV::getBool(kNsRadar, kKeyKm, false);
@@ -160,6 +183,9 @@ void init() {
   s_show_terrain = KV::getBool(kNsRadar, kKeyTerrain, true);
 
   loadSitesFromStorage();
+  if (s_site_count == 0) {
+    seedDefaultSite();
+  }
   applyActiveSiteCoords();
 }
 
@@ -169,39 +195,11 @@ double lat() { return s_lat; }
 
 double lon() { return s_lon; }
 
-bool saveLocationFromStrings(const char* lat_str, const char* lon_str) {
-  double lat_v = 0.0;
-  double lon_v = 0.0;
-  if (!parseCoord(lat_str, &lat_v) || !parseCoord(lon_str, &lon_v)) {
-    return false;
-  }
-  if (!validLatLon(lat_v, lon_v)) {
-    return false;
-  }
-
-  KV::putDouble(kNsLocation, kKeyLat, lat_v);
-  KV::putDouble(kNsLocation, kKeyLon, lon_v);
-  if (s_site_count == 0) {
-    s_lat = lat_v;
-    s_lon = lon_v;
-  }
-
-  platform::logf("Radar location saved: %.6f, %.6f\n", lat_v, lon_v);
-  return true;
-}
-
 void clearLocation() {
-  KV::remove(kNsLocation, kKeyLat);
-  KV::remove(kNsLocation, kKeyLon);
   KV::remove(kNsRadar, kKeySites);
   KV::remove(kNsRadar, kKeySiteIdx);
-  s_lat = config::kDefaultRadarLat;
-  s_lon = config::kDefaultRadarLon;
-  s_site_count = 0;
-  s_site_index = 0;
-  for (size_t i = 0; i < kMaxSites; ++i) {
-    s_site_idents[i][0] = '\0';
-  }
+  seedDefaultSite();
+  applyActiveSiteCoords();
 }
 
 // --- Airport site list -------------------------------------------------------
@@ -259,29 +257,23 @@ bool saveSites(const char* const* idents, size_t count) {
     ++n;
   }
 
-  s_site_count = n;
-  s_site_index = (s_site_index < s_site_count) ? s_site_index : 0;
-  for (size_t i = 0; i < kMaxSites; ++i) {
-    if (i < n) {
-      memcpy(s_site_idents[i], resolved[i], sizeof(s_site_idents[i]));
-    } else {
-      s_site_idents[i][0] = '\0';
+  if (n == 0) {
+    // Blanking every slot means "back to the default airport", the only
+    // remaining meaning now that there is no manual coordinate to fall back to.
+    seedDefaultSite();
+  } else {
+    s_site_count = n;
+    s_site_index = (s_site_index < s_site_count) ? s_site_index : 0;
+    for (size_t i = 0; i < kMaxSites; ++i) {
+      if (i < n) {
+        memcpy(s_site_idents[i], resolved[i], sizeof(s_site_idents[i]));
+      } else {
+        s_site_idents[i][0] = '\0';
+      }
     }
   }
 
   persistSitesString();
-  if (s_site_count == 0) {
-    KV::remove(kNsRadar, kKeySiteIdx);
-    if (KV::has(kNsLocation, kKeyLat) && KV::has(kNsLocation, kKeyLon)) {
-      s_lat = KV::getDouble(kNsLocation, kKeyLat, config::kDefaultRadarLat);
-      s_lon = KV::getDouble(kNsLocation, kKeyLon, config::kDefaultRadarLon);
-    } else {
-      s_lat = config::kDefaultRadarLat;
-      s_lon = config::kDefaultRadarLon;
-    }
-    return true;
-  }
-
   KV::putU8(kNsRadar, kKeySiteIdx, s_site_index);
   applyActiveSiteCoords();
   platform::logf("Airport sites saved: %u active\n",
@@ -337,23 +329,6 @@ void unitsReset() {
 }
 
 // --- Pure helpers ------------------------------------------------------------
-
-bool parseCoord(const char* text, double* out) {
-  if (text == nullptr || text[0] == '\0') {
-    return false;
-  }
-  char* end = nullptr;
-  const double v = strtod(text, &end);
-  if (end == text || (end != nullptr && *end != '\0')) {
-    return false;
-  }
-  *out = v;
-  return true;
-}
-
-bool validLatLon(double lat_v, double lon_v) {
-  return lat_v >= -90.0 && lat_v <= 90.0 && lon_v >= -180.0 && lon_v <= 180.0;
-}
 
 bool portalCheckboxChecked(const char* value) {
   if (value == nullptr || value[0] == '\0') {

@@ -2,8 +2,8 @@
  * Host unit tests for the pure logic in core::settings.
  *
  * These lock the behaviours that the device/native split is most likely to
- * silently change: coordinate parsing, the WiFiManager checkbox quirk, and the
- * ring-3 label rounding that the radar's scale label is drawn from.
+ * silently change: the never-empty site list, the WiFiManager checkbox quirk,
+ * and the ring-3 label rounding that the radar's scale label is drawn from.
  */
 
 #include <unity.h>
@@ -12,56 +12,41 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "config.h"
 #include "core/settings.h"
 #include "core/airport_find.h"
 
 namespace cs = core::settings;
 namespace ca = core::airport;
 
-// --- parseCoord --------------------------------------------------------------
+// --- default site ------------------------------------------------------------
 
-void test_parseCoord_accepts_plain_and_signed(void) {
-  double v = 0.0;
-  TEST_ASSERT_TRUE(cs::parseCoord("52.3676", &v));
-  TEST_ASSERT_DOUBLE_WITHIN(1e-9, 52.3676, v);
+/** Must run before anything else writes to the scratch store. */
+void test_fresh_store_seeds_the_default_site(void) {
+  cs::init();
 
-  TEST_ASSERT_TRUE(cs::parseCoord("-4.9041", &v));
-  TEST_ASSERT_DOUBLE_WITHIN(1e-9, -4.9041, v);
+  TEST_ASSERT_EQUAL_size_t(1, cs::siteCount());
+  TEST_ASSERT_EQUAL_STRING(config::kDefaultSiteIdent, cs::siteActiveIdent());
 
-  TEST_ASSERT_TRUE(cs::parseCoord("0", &v));
-  TEST_ASSERT_DOUBLE_WITHIN(1e-9, 0.0, v);
+  data::large_airports::Airport ap{};
+  TEST_ASSERT_TRUE(ca::findAirport(config::kDefaultSiteIdent, &ap));
+  TEST_ASSERT_DOUBLE_WITHIN(1e-5, static_cast<double>(ap.lat_e7) / 1.0e7,
+                            cs::lat());
+  TEST_ASSERT_DOUBLE_WITHIN(1e-5, static_cast<double>(ap.lon_e7) / 1.0e7,
+                            cs::lon());
 }
 
-void test_parseCoord_rejects_empty_and_null(void) {
-  double v = 0.0;
-  TEST_ASSERT_FALSE(cs::parseCoord(nullptr, &v));
-  TEST_ASSERT_FALSE(cs::parseCoord("", &v));
-}
+void test_saveSites_with_no_idents_reseeds_the_default(void) {
+  // Blanking every portal slot is the only way to reach an empty list, and it
+  // must land on the default rather than on no centre at all.
+  const char* both[] = {"LOWG", "LOWW"};
+  TEST_ASSERT_TRUE(cs::saveSites(both, 2));
+  TEST_ASSERT_EQUAL_size_t(2, cs::siteCount());
 
-void test_parseCoord_rejects_trailing_garbage(void) {
-  // The strictness matters: the portal is free text, and "52.3676 N" silently
-  // parsing as 52.3676 would hide a user error rather than reporting it.
-  double v = 0.0;
-  TEST_ASSERT_FALSE(cs::parseCoord("52.3676 N", &v));
-  TEST_ASSERT_FALSE(cs::parseCoord("52,3676", &v));
-  TEST_ASSERT_FALSE(cs::parseCoord("abc", &v));
-  TEST_ASSERT_FALSE(cs::parseCoord("12abc", &v));
-}
-
-// --- validLatLon -------------------------------------------------------------
-
-void test_validLatLon_accepts_range_including_bounds(void) {
-  TEST_ASSERT_TRUE(cs::validLatLon(0.0, 0.0));
-  TEST_ASSERT_TRUE(cs::validLatLon(52.3676, 4.9041));
-  TEST_ASSERT_TRUE(cs::validLatLon(90.0, 180.0));
-  TEST_ASSERT_TRUE(cs::validLatLon(-90.0, -180.0));
-}
-
-void test_validLatLon_rejects_out_of_range(void) {
-  TEST_ASSERT_FALSE(cs::validLatLon(90.1, 0.0));
-  TEST_ASSERT_FALSE(cs::validLatLon(-90.1, 0.0));
-  TEST_ASSERT_FALSE(cs::validLatLon(0.0, 180.1));
-  TEST_ASSERT_FALSE(cs::validLatLon(0.0, -180.1));
+  const char* blank[] = {"", nullptr};
+  TEST_ASSERT_TRUE(cs::saveSites(blank, 2));
+  TEST_ASSERT_EQUAL_size_t(1, cs::siteCount());
+  TEST_ASSERT_EQUAL_STRING(config::kDefaultSiteIdent, cs::siteActiveIdent());
 }
 
 // --- portalCheckboxChecked ---------------------------------------------------
@@ -213,12 +198,8 @@ int main(int, char**) {
 
   UNITY_BEGIN();
 
-  RUN_TEST(test_parseCoord_accepts_plain_and_signed);
-  RUN_TEST(test_parseCoord_rejects_empty_and_null);
-  RUN_TEST(test_parseCoord_rejects_trailing_garbage);
-
-  RUN_TEST(test_validLatLon_accepts_range_including_bounds);
-  RUN_TEST(test_validLatLon_rejects_out_of_range);
+  RUN_TEST(test_fresh_store_seeds_the_default_site);
+  RUN_TEST(test_saveSites_with_no_idents_reseeds_the_default);
 
   RUN_TEST(test_checkbox_single_TF_means_submitted);
   RUN_TEST(test_checkbox_accepts_conventional_on);
