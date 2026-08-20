@@ -56,6 +56,26 @@ void fetchAndDrawAircraft() {
     handleBootButton();
     return;
   }
+
+  // After successful aircraft fetch, try to resolve destinations for
+  // any planes we don't yet have route info for. Limit to one route
+  // lookup per refresh cycle to avoid hammering the API.
+  const size_t n = services::adsb::aircraftCount();
+  services::adsb::Aircraft* planes = const_cast<services::adsb::Aircraft*>(
+      services::adsb::aircraftList());
+  for (size_t i = 0; i < n; ++i) {
+    if (planes[i].callsign[0] == '\0') continue;
+    if (planes[i].dest[0] != '\0') continue;  // Already known
+
+    char fetched_dest[5] = {};
+    if (services::adsb::fetchRoute(planes[i].callsign, fetched_dest, sizeof(fetched_dest))) {
+      strncpy(planes[i].dest, fetched_dest, sizeof(planes[i].dest) - 1);
+      planes[i].dest[sizeof(planes[i].dest) - 1] = '\0';
+      planes[i].dest_fetched_ms = millis();
+    }
+    break;  // One lookup per cycle
+  }
+
   ui::radarDisplayRefreshAircraft();
   handleBootButton();
 }

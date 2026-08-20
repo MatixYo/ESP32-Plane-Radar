@@ -15,7 +15,7 @@
 #include "ui/radar_theme.h"
 #include "ui/runway_overlay.h"
 
-namespace fonts = lgfx::v1::fonts;
+// namespace fonts = lgfx::v1::fonts;  // Already declared in newer LovyanGFX
 
 namespace ui {
 namespace radar {
@@ -378,36 +378,38 @@ void applyTagStyle() {
   }
 }
 
-int measureTagBlockWidth(const services::adsb::Aircraft& plane) {
+int measureTagBlockWidth(const services::adsb::Aircraft& plane, bool show_dest) {
   applyTagStyle();
   int max_w = 0;
-  if (plane.callsign[0] != '\0') {
+
+  // Line 1: callsign OR destination
+  if (show_dest && plane.dest[0] != '\0') {
+    char label[16];
+    snprintf(label, sizeof(label), "\u2192 %s", plane.dest);  // → IBZ
+    const int w = s_draw->textWidth(label);
+    if (w > max_w) max_w = w;
+  } else if (plane.callsign[0] != '\0') {
     const int w = s_draw->textWidth(plane.callsign);
-    if (w > max_w) {
-      max_w = w;
-    }
+    if (w > max_w) max_w = w;
   }
+
   if (plane.type[0] != '\0') {
     const int w = s_draw->textWidth(plane.type);
-    if (w > max_w) {
-      max_w = w;
-    }
+    if (w > max_w) max_w = w;
   }
   if (plane.alt[0] != '\0') {
     const int w = s_draw->textWidth(plane.alt);
-    if (w > max_w) {
-      max_w = w;
-    }
+    if (w > max_w) max_w = w;
   }
   return max_w;
 }
 
-void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
+void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane, bool show_dest) {
   initTagLabelMetrics();
   applyTagStyle();
 
   const int line_h = s_draw->fontHeight();
-  const int block_w = measureTagBlockWidth(plane);
+  const int block_w = measureTagBlockWidth(plane, show_dest);
   const int block_h = line_h * 3;
   int ly = y - block_h / 2;
 
@@ -427,7 +429,12 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   }
   ly = std::max(1, std::min(ly, radar::kSize - block_h - 1));
 
-  if (plane.callsign[0] != '\0') {
+  if (show_dest && plane.dest[0] != '\0') {
+    s_draw->setTextColor(radar::kColorTagAltitude, radar::kColorBackground);
+    char label[16];
+    snprintf(label, sizeof(label), "\u2192 %s", plane.dest);
+    s_draw->drawString(label, anchor_x, ly);
+  } else if (plane.callsign[0] != '\0') {
     s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
     s_draw->drawString(plane.callsign, anchor_x, ly);
   }
@@ -523,6 +530,10 @@ void drawAircraft() {
     ++dot_count;
   }
 
+  // Global toggle: flip between callsign and destination every refresh
+  static bool s_show_dest = false;
+  s_show_dest = !s_show_dest;
+
   sortBeyondDotsFarFirst(dots, dot_count);
   for (size_t d = 0; d < dot_count; ++d) {
     drawBeyondRingDot(dots[d].x, dots[d].y);
@@ -539,7 +550,7 @@ void drawAircraft() {
   }
   for (size_t d = 0; d < draw_count; ++d) {
     const size_t i = items[d].index;
-    drawAircraftTag(items[d].x, items[d].y, planes[i]);
+    drawAircraftTag(items[d].x, items[d].y, planes[i], s_show_dest);
   }
 }
 

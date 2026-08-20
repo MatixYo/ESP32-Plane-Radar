@@ -8,12 +8,14 @@
 #include <cstring>
 
 #include "config.h"
+#include "services/route_cache.h"
 
 namespace services::adsb {
 
 namespace {
 
 constexpr char kApiBase[] = "https://opendata.adsb.fi/api/v3/lat/";
+constexpr char kRouteApiBase[] = "https://api.adsbdb.com/v1/callsign/";
 constexpr float kKmPerNm = 1.852f;
 constexpr int kConnectAttemptMs = 200;
 constexpr unsigned long kRequestTimeoutMs = 10000;
@@ -195,6 +197,10 @@ void fillTagFields(Aircraft* ac, const JsonObject& plane) {
 
   copyJsonStringTrimmed(plane, "t", ac->type, sizeof(ac->type));
   formatAltitudeTag(plane, ac->alt, sizeof(ac->alt));
+
+  // Reset route fields
+  ac->dest[0] = '\0';
+  ac->dest_fetched_ms = 0;
 }
 
 }  // namespace
@@ -204,6 +210,71 @@ void setPollFn(PollFn fn) { s_poll_fn = fn; }
 size_t aircraftCount() { return s_aircraft_count; }
 
 const Aircraft* aircraftList() { return s_aircraft; }
+
+bool fetchRoute(const char* callsign, char* dest_iata_out, size_t dest_len) {
+  if (callsign == nullptr || callsign[0] == '\0' || dest_iata_out == nullptr || dest_len == 0) {
+    return false;
+  }
+
+  // Check cache first
+  if (services::route_cache::lookup(callsign, dest_iata_out, dest_len)) {
+    return true;
+  }
+
+  String url = kRouteApiBase;
+  url += callsign;
+
+  WiFiClientSecure client;
+  client.setInsecure();
+
+  HTTPClient http;
+  if (!http.begin(client, url)) {
+    return false;
+  }
+
+  http.setTimeout(kRequestTimeoutMs);
+  const int code = performGetWithPoll(http);
+  if (code == HTTP_CODE_NOT_FOUND) {
+    // Unknown callsign — cache empty result so we don't hammer
+    services::route_cache::store(callsign, "");
+    http.end();
+    return false;
+  }
+  if (code != HTTP_CODE_OK) {
+    http.end();
+    return false;
+  }
+
+  String payload;
+  if (!readResponseBodyWithPoll(http, payload)) {
+    http.end();
+    return false;
+  }
+  http.end();
+
+  JsonDocument doc;
+  const DeserializationError err = deserializeJson(doc, payload);
+  if (err) {
+    return false;
+  }
+
+  JsonObject flightroute = doc["response"]["flightroute"];
+  if (flightroute.isNull()) {
+    services::route_cache::store(callsign, "");
+    return false;
+  }
+
+  const char* dest_iata = flightroute["destination"]["iata_code"] | "";
+  services::route_cache::store(callsign, dest_iata);
+
+  if (dest_iata[0] == '\0') {
+    return false;
+  }
+
+  strncpy(dest_iata_out, dest_iata, dest_len - 1);
+  dest_iata_out[dest_len - 1] = '\0';
+  return true;
+}
 
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   const float dist_nm = kmToNauticalMiles(fetch_radius_km);
@@ -271,6 +342,13 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     s_aircraft[n].track_deg = pickTrackHeading(plane);
     s_aircraft[n].gs_knots = pickGroundSpeed(plane);
     fillTagFields(&s_aircraft[n], plane);
+
+    // Try to populate destination from cache (don't HTTP here — batch later)
+    services::route_cache::lookup(s_aircraft[n].callsign, s_aircraft[n].dest, sizeof(s_aircraft[n].dest));
+    if (s_aircraft[n].dest[0] != '\0') {
+      s_aircraft[n].dest_fetched_ms = millis();
+    }
+
     ++n;
   }
 
