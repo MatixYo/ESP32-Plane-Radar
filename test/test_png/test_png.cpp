@@ -21,10 +21,27 @@
  * a device with no way to report a crash: greyscale, interlaced, truncated,
  * corrupt, and a bad signature must each come back false with the process
  * intact.
+ *
+ * The zlib Adler-32 has three of its own cases, because it is the only check
+ * here that is about the DATA rather than the structure: a wrong trailer, a
+ * missing one, and the case that justifies the whole thing — a stream that
+ * inflates without complaint to a full raster of the wrong bytes. All three
+ * hand over every pixel before failing, which is exactly why nothing else in
+ * the decoder can catch them.
+ *
+ * A stream that inflates PAST the declared height has its own case for the
+ * opposite reason: what matters there is not only that it is refused but that it
+ * is refused before a single pixel lands outside the image, because the sink on
+ * the other end is the elevation grid.
+ *
+ * Every fixture that decodes is also asserted to decode SILENTLY. The decoder
+ * logs only when it gives up, so that is what keeps each guard it grows from
+ * quietly starting to refuse well-formed images.
  */
 
 #include <unity.h>
 
+#include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -71,6 +88,17 @@ bool guardIntact() {
   }
   return true;
 }
+
+// --- What the decoder complained about ---------------------------------------
+
+/**
+ * The decoder logs only when it gives up, so a successful decode is silent — and
+ * that makes silence worth asserting. Every guard added to the decoder is a
+ * chance to refuse something well-formed, and this is what turns such a
+ * regression from a mystery into a failure that quotes the decoder's own reason.
+ */
+char s_log_first[160];
+size_t s_log_lines = 0;
 
 // --- The pixel sink -----------------------------------------------------------
 
@@ -137,12 +165,19 @@ void assertRasterShape(const fx::Fixture& fixture) {
   snprintf(msg, sizeof(msg), "%s wrote past the scratch it was lent",
            fixture.name);
   TEST_ASSERT_TRUE_MESSAGE(guardIntact(), msg);
+
+  // Every caller of this got true out of decode(), and a decode that succeeded
+  // has nothing to say. This is what would catch a guard that starts refusing
+  // well-formed images: the message it logged becomes the failure message.
+  if (s_log_lines != 0) {
+    snprintf(msg, sizeof(msg), "%s decoded but complained: %s", fixture.name,
+             s_log_first);
+    TEST_FAIL_MESSAGE(msg);
+  }
 }
 
-void assertDecodes(const fx::Fixture& fixture) {
-  TEST_ASSERT_TRUE_MESSAGE(decodeFixture(fixture), fixture.name);
-  assertRasterShape(fixture);
-
+/** The pixels themselves, against the raster the generator emitted. */
+void assertRasterMatches(const fx::Fixture& fixture) {
   TEST_ASSERT_NOT_NULL_MESSAGE(fixture.rgb, fixture.name);
   TEST_ASSERT_EQUAL_UINT(fixture.rgb_len, s_capture.rgb.size());
 
@@ -160,6 +195,12 @@ void assertDecodes(const fx::Fixture& fixture) {
   }
 }
 
+void assertDecodes(const fx::Fixture& fixture) {
+  TEST_ASSERT_TRUE_MESSAGE(decodeFixture(fixture), fixture.name);
+  assertRasterShape(fixture);
+  assertRasterMatches(fixture);
+}
+
 void assertRejected(const fx::Fixture& fixture) {
   TEST_ASSERT_FALSE_MESSAGE(decodeFixture(fixture), fixture.name);
 
@@ -173,6 +214,21 @@ void assertRejected(const fx::Fixture& fixture) {
   snprintf(msg, sizeof(msg), "%s wrote past the scratch it was lent",
            fixture.name);
   TEST_ASSERT_TRUE_MESSAGE(guardIntact(), msg);
+}
+
+/**
+ * Refused, but only after the whole image was handed over. That is the shape of
+ * a checksum failure and it is what separates one from a structural failure: if
+ * anything else in the decoder had objected, it would have objected earlier and
+ * the raster would be short.
+ */
+void assertRejectedWithRasterComplete(const fx::Fixture& fixture) {
+  assertRejected(fixture);
+  const size_t expected = static_cast<size_t>(fixture.width) * fixture.height;
+  char msg[128];
+  snprintf(msg, sizeof(msg), "%s stopped before the raster was complete",
+           fixture.name);
+  TEST_ASSERT_EQUAL_UINT_MESSAGE(expected, s_capture.count, msg);
 }
 
 uint64_t fnv1a64(const std::vector<uint8_t>& data) {
@@ -189,9 +245,18 @@ uint64_t fnv1a64(const std::vector<uint8_t>& data) {
 
 namespace core::platform {
 
-// Silent: the decoder logs a line per rejected image, and the point of the
-// reject tests is that they all run in one go and stay readable.
-void logf(const char*, ...) {}
+// Captured rather than printed: the reject tests would otherwise scatter a line
+// each through the Unity output, and what the decoder said is more useful as an
+// assertion than as noise.
+void logf(const char* fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  if (s_log_lines == 0) {
+    vsnprintf(s_log_first, sizeof(s_log_first), fmt, args);
+  }
+  va_end(args);
+  ++s_log_lines;
+}
 
 unsigned long nowMs() { return 0; }
 
@@ -257,6 +322,15 @@ void test_ancillary_chunks_are_skipped(void) {
   // pHYs and tEXt ahead of the image data, another tEXt after it. All three
   // have to be walked past on chunk length alone.
   assertDecodes(fx::kAncillaryChunks);
+}
+
+void test_data_followed_by_an_empty_final_block_still_decodes(void) {
+  // A flushing encoder ends the raster in a non-final block and closes the
+  // stream with an empty one, which puts the Adler-32 trailer somewhere other
+  // than immediately after the data. The decoder answers such an image without
+  // verifying the checksum, deliberately: refusing it instead would break every
+  // tile from an encoder that flushes, to catch nothing.
+  assertDecodes(fx::kEmptyFinalBlock);
 }
 
 // --- The real tile size ------------------------------------------------------
@@ -355,11 +429,56 @@ void test_bad_signature_is_rejected(void) {
   TEST_ASSERT_EQUAL_UINT(0, s_capture.count);
 }
 
+// --- The zlib Adler-32 -------------------------------------------------------
+
+void test_wrong_adler_is_rejected(void) {
+  // Only the trailer was touched; the image data inflates to exactly the right
+  // raster. So this fixture can fail for one reason alone, which makes it the
+  // one that proves the checksum is read and compared at all.
+  assertRejectedWithRasterComplete(fx::kRejectWrongAdler);
+}
+
+void test_silent_corruption_is_caught_by_the_checksum(void) {
+  // The case the checksum exists for. The stream is structurally perfect,
+  // inflates without complaint, and yields a complete raster of the wrong
+  // bytes — every other check in the decoder passes it, and what reaches the
+  // map is a tile of terrain that looks entirely plausible and is not there.
+  assertRejectedWithRasterComplete(fx::kRejectSilentCorruption);
+}
+
+// --- More data than the image declares ---------------------------------------
+
+void test_a_stream_that_runs_past_the_last_row_is_rejected(void) {
+  // IHDR says 16 rows, the image data inflates to 17. Everything else about the
+  // image is well-formed — it inflates cleanly, the extra row's filter byte is
+  // legal, and the Adler-32 covers the over-long data and matches — so the row
+  // count is the only thing that can refuse it.
+  assertRejectedWithRasterComplete(fx::kRejectExtraScanline);
+
+  // The refusal has to come BEFORE the sink is handed anything: a 17th row costs
+  // one call with y == height, and the terrain grid is what is on the other end
+  // of that. assertRejected checks the bounds for every reject; this fixture is
+  // the one that would actually produce the violation, so it is stated here too.
+  TEST_ASSERT_TRUE_MESSAGE(s_capture.bounds_ok,
+                           "a row past the declared height reached the sink");
+
+  // And the rows it did declare arrived intact, not abandoned halfway.
+  assertRasterMatches(fx::kRejectExtraScanline);
+}
+
+void test_missing_adler_is_rejected(void) {
+  // The body ended four bytes early: raster complete, trailer absent. An
+  // unverifiable image is not a valid one, so this is a refusal and not a pass.
+  assertRejectedWithRasterComplete(fx::kRejectMissingAdler);
+}
+
 void setUp(void) {
   memset(s_scratch, kGuardByte, sizeof(s_scratch));
   s_scratch_offered = true;
   s_scratch_asked = 0;
   s_capture = Capture{};
+  s_log_lines = 0;
+  s_log_first[0] = '\0';
   platform_png::setScratch(lendScratch);
 }
 
@@ -382,6 +501,7 @@ int main(int, char**) {
   RUN_TEST(test_idat_split_across_chunks);
   RUN_TEST(test_idat_boundary_inside_a_scanline);
   RUN_TEST(test_ancillary_chunks_are_skipped);
+  RUN_TEST(test_data_followed_by_an_empty_final_block_still_decodes);
 
   RUN_TEST(test_full_size_terrarium_tile);
   RUN_TEST(test_no_callback_lands_outside_the_image);
@@ -394,6 +514,12 @@ int main(int, char**) {
   RUN_TEST(test_truncated_body_is_rejected);
   RUN_TEST(test_corrupt_deflate_is_rejected);
   RUN_TEST(test_bad_signature_is_rejected);
+
+  RUN_TEST(test_wrong_adler_is_rejected);
+  RUN_TEST(test_silent_corruption_is_caught_by_the_checksum);
+  RUN_TEST(test_missing_adler_is_rejected);
+
+  RUN_TEST(test_a_stream_that_runs_past_the_last_row_is_rejected);
 
   return UNITY_END();
 }

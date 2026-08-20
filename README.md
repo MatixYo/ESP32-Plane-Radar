@@ -123,6 +123,8 @@ Tiles come over `https://` — the bucket policy requires it and answers plain H
 
 Freeing the sprite for the duration does not solve it: measured, the TLS path leaves a few hundred bytes stranded inside the 115 KB hole (largest free block comes back as 114 676 against the 115 200 needed) and TCP `TIME_WAIT` holds them there, so the sprite never returns and every later frame has to be painted straight onto the panel. So the decoder in `platform/png_decode.cpp` — own inflate, no pngle — **allocates nothing at all**: it works in scratch the display lends it, which is the frame sprite's own pixels. Nobody is compositing a frame while a tile decodes, the panel keeps showing the last one blitted, and the frame is repainted when the grid lands. Nothing is allocated at run time, so nothing can fail to be allocated.
 
+Being our own decoder, it also verifies zlib's Adler-32 over every tile: structural checks alone can pass on a stream that inflates to the wrong bytes, and the failure mode that hides behind is terrain that looks perfectly plausible. A tile that fails it is refused and retried like any other bad tile.
+
 Upsampling the grid to the frame is fixed-point for the same reason of scale: it touches 57 600 pixels per redraw, and the C3 core has no FPU, so in floats it measured 209 ms of a 297 ms frame against 37 ms in integers.
 
 Tiles replaced per-point elevation queries, which billed hundreds of coordinates per view: 7 rate-limited requests paced 12 s apart, about 1.5 min per view, and HTTP 429 when the budget slipped.
@@ -275,7 +277,7 @@ make test-live          # opt-in live terrain tile fetch (needs internet)
 ```
 
 - PlatformIO envs: **`supermini`** (release), **`supermini_debug`** (`-Og -g`, on-device GDB), **`native`** / **`native_test`** / **`native_test_fetch`** / **`native_test_png`** / **`native_test_live`** (host)
-- `native_test_fetch` runs the tile download state machine against a scripted HTTP client, fake clock and fake PNG decoder — no network. `native_test_png` runs the real decoder against generated PNGs (every filter, all three DEFLATE block types, split IDATs, truncated and corrupt streams) plus a full-size tile, and checks it writes nothing outside the scratch it was lent; fixtures come from `scripts/gen_png_fixtures.py`. `native_test_live` (`make test-live`) is an opt-in smoke test that pulls a real tile from the AWS bucket, so it stays out of `make test`
+- `native_test_fetch` runs the tile download state machine against a scripted HTTP client, fake clock and fake PNG decoder — no network. `native_test_png` runs the real decoder against generated PNGs (every filter, all three DEFLATE block types, split IDATs, truncated and corrupt streams, a stream that inflates to the wrong bytes with a valid structure, one that runs past the declared height) plus a full-size tile, and checks it writes nothing outside the scratch it was lent; fixtures come from `scripts/gen_png_fixtures.py`. `native_test_live` (`make test-live`) is an opt-in smoke test that pulls a real tile from the AWS bucket, so it stays out of `make test`
 - Serial: **115200** baud
 - USB CDC on boot enabled in `platformio.ini` for the Super Mini
 

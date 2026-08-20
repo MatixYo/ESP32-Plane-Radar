@@ -549,6 +549,16 @@ class Decoder {
    * whole stream, so masking it gives the circular position.
    */
   bool emit(uint8_t byte) {
+    // A stream that inflates past the declared height must be refused here, not
+    // afterwards in run(): one more full scanline is all it takes to reach
+    // emitRow() with y == height_, and sinks are entitled to trust the bounds
+    // PixelFn promises them. A well-formed stream ends its final block on the
+    // last scanline byte, so this never fires on one.
+    if (rows_done_ >= height_) {
+      core::platform::logf("png: stream runs past the last row\n");
+      return false;
+    }
+
     w_->window[written_ & kWindowMask] = byte;
     ++written_;
     updateAdler(byte);

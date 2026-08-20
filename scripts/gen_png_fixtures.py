@@ -346,19 +346,34 @@ def deflate_blocks(stream: bytes) -> tuple[list[DeflateBlock], bytes, int]:
     return blocks, bytes(out), reader.pos
 
 
-def raster_completing_block(stream: bytes, raw_len: int) -> DeflateBlock:
+def completing_block(blocks: list[DeflateBlock], raw_len: int) -> DeflateBlock:
     """The block png_decode.cpp is inside when the last scanline byte lands.
 
     Its BFINAL flag is what decides whether the Adler-32 check runs at all: the
     decoder's loop ends on the first block that either carries BFINAL or takes
     the row count to the image height, and only verifies in the former case.
     """
-    blocks, out, _ = deflate_blocks(stream)
-    assert out == zlib.decompress(stream), "block walk disagrees with zlib"
     for block in blocks:
         if block.final or block.output_end >= raw_len:
             return block
     raise AssertionError("stream ends before the raster does")
+
+
+def raster_completing_block(stream: bytes, raw_len: int) -> DeflateBlock:
+    """As above, for a healthy stream, cross-checked against zlib's own output."""
+    blocks, out, _ = deflate_blocks(stream)
+    assert out == zlib.decompress(stream), "block walk disagrees with zlib"
+    return completing_block(blocks, raw_len)
+
+
+def reaches_adler_check(stream: bytes, raw_len: int) -> bool:
+    """Whether a DAMAGED stream still gets as far as the trailer comparison.
+
+    Same question as above, minus the cross-check against zlib: these streams are
+    ones zlib refuses outright, which is the reason they exist.
+    """
+    blocks, _, _ = deflate_blocks(stream)
+    return completing_block(blocks, raw_len).final
 
 
 def split_idat(stream: bytes, boundaries: tuple[int, ...]) -> bytes:
@@ -830,7 +845,65 @@ def build_reject_fixtures(dynamic_pixels: bytes) -> list[Fixture]:
     bad_signature_png = bytearray(valid_png)
     bad_signature_png[1] = ord("Q")
 
-    return [
+    # The three checksum cases share this base image, so what separates them is
+    # only which part of a perfectly good stream was damaged.
+    expected_raw = filtered_stream(32, 16, dynamic_pixels, (4,), 3)
+    row_bytes = 1 + 32 * 3
+    adler_rejects = [
+        Fixture(
+            name="reject_wrong_adler",
+            symbol="RejectWrongAdler",
+            doc=(
+                "Last byte of the stream flipped, i.e. the Adler-32 trailer and "
+                "nothing else. The image data inflates perfectly to the right "
+                "raster, so this fixture fails only if the checksum is read and "
+                "compared — it is the one that proves the check runs at all."
+            ),
+            png=corrupt_adler_trailer(valid_png),
+            width=32,
+            height=16,
+            pixels=None,
+            emit_pixels=False,
+            rejected=True,
+            expected_raw=expected_raw,
+        ),
+        Fixture(
+            name="reject_silent_corruption",
+            symbol="RejectSilentCorruption",
+            doc=(
+                "Image data altered so that it still inflates, to a full raster "
+                "of the right size but the wrong bytes, against an untouched "
+                "trailer. Every structural check in the decoder passes and a "
+                "whole tile of plausible-looking terrain is handed over: the "
+                "checksum is the only thing standing between that and the map."
+            ),
+            png=corrupt_silently(valid_png, expected_raw, row_bytes),
+            width=32,
+            height=16,
+            pixels=None,
+            emit_pixels=False,
+            rejected=True,
+            expected_raw=expected_raw,
+        ),
+        Fixture(
+            name="reject_missing_adler",
+            symbol="RejectMissingAdler",
+            doc=(
+                "The stream cut off exactly after the last scanline byte, so "
+                "the raster is complete and the trailer is simply absent — the "
+                "body ended four bytes early."
+            ),
+            png=drop_adler_trailer(valid_png),
+            width=32,
+            height=16,
+            pixels=None,
+            emit_pixels=False,
+            rejected=True,
+            expected_raw=expected_raw,
+        ),
+    ]
+
+    return adler_rejects + [build_extra_scanline_fixture()] + [
         Fixture(
             name="reject_greyscale",
             symbol="RejectGreyscale",
@@ -899,6 +972,42 @@ def build_reject_fixtures(dynamic_pixels: bytes) -> list[Fixture]:
             rejected=True,
         ),
     ]
+
+
+def build_extra_scanline_fixture() -> Fixture:
+    """A stream that keeps going after the height in IHDR says it should stop.
+
+    One extra filter byte and one extra scanline: the smallest overrun that can
+    actually reach the pixel sink, because a shorter one never completes a row.
+    Everything else about the image is impeccable — it inflates cleanly, its
+    declared rows are correct, the extra row's filter byte is a legal 0, and the
+    Adler-32 covers the over-long data and therefore matches. So the row count is
+    the only thing left that can refuse it, which is what makes this fixture
+    evidence about that guard and nothing else.
+
+    Unlike the other rejects it emits its expected raster, because half of what
+    it asserts is that the declared rows arrived intact before the refusal.
+    """
+    width, height = 32, 16
+    pixels = mottled_pattern(width, height, seed=23)
+    raw = filtered_stream(width, height, pixels, (2,), 3)
+    extra = bytes([0]) + bytes([0x77] * (width * 3))
+
+    return Fixture(
+        name="reject_extra_scanline",
+        symbol="RejectExtraScanline",
+        doc=(
+            "IHDR declares 16 rows; the image data inflates to 17. Rejected — "
+            "and the seventeenth row must never reach the sink, which is "
+            "entitled to the bounds PixelFn promises it."
+        ),
+        png=make_png(width, height, pixels, filters=(2,), stream=deflate(raw + extra)),
+        width=width,
+        height=height,
+        pixels=pixels,
+        rejected=True,
+        expected_raw=raw,
+    )
 
 
 def find_chunk(data: bytes, tag: bytes) -> tuple[int, int]:
@@ -1021,6 +1130,20 @@ def drop_adler_trailer(data: bytes) -> bytes:
 # --- Reference decode, i.e. the self-check -----------------------------------
 
 
+def unfilter_all(raw: bytes, width: int, height: int, bpp: int) -> bytes:
+    """A filtered stream turned back into a raster, row by row."""
+    stride = width * bpp
+    assert len(raw) >= height * (1 + stride), "filtered stream is short"
+    prior = bytes(stride)
+    out = bytearray()
+    for row in range(height):
+        start = row * (1 + stride)
+        line = unfilter_row(raw[start], raw[start + 1 : start + 1 + stride], prior, bpp)
+        out += line
+        prior = line
+    return bytes(out)
+
+
 def reference_decode(data: bytes) -> tuple[int, int, bytes]:
     """Decode our own output with zlib and the unfilter above.
 
@@ -1055,16 +1178,8 @@ def reference_decode(data: bytes) -> tuple[int, int, bytes]:
     bpp = BYTES_PER_PIXEL[colour_type]
     raw = zlib.decompress(bytes(compressed))
 
-    stride = width * bpp
-    assert len(raw) == height * (1 + stride), "unexpected filtered length"
-    prior = bytes(stride)
-    out = bytearray()
-    for row in range(height):
-        start = row * (1 + stride)
-        line = unfilter_row(raw[start], raw[start + 1 : start + 1 + stride], prior, bpp)
-        out += line
-        prior = line
-    return width, height, bytes(out)
+    assert len(raw) == height * (1 + width * bpp), "unexpected filtered length"
+    return width, height, unfilter_all(raw, width, height, bpp)
 
 
 def fnv1a64(data: bytes) -> int:
@@ -1087,12 +1202,21 @@ def self_check(fixtures: list[Fixture]) -> None:
         assert len(fixture.pixels) == width * height * 3, fixture.name
         assert decoded == fixture.pixels, f"{fixture.name} raster mismatch"
 
-        block_type = first_block_type(idat_stream(fixture.png))
+        stream = idat_stream(fixture.png)
+        block_type = first_block_type(stream)
         block_types.add(block_type)
         if fixture.block_type is not None:
             assert block_type == fixture.block_type, (
                 f"{fixture.name} is BTYPE {block_type}, not {fixture.block_type}"
             )
+
+        raw_len = height * (1 + width * BYTES_PER_PIXEL[COLOUR_TYPE_RGB])
+        completing = raster_completing_block(stream, raw_len)
+        assert completing.final == fixture.verifies_adler, (
+            f"{fixture.name} completes its raster in a "
+            f"{'final' if completing.final else 'non-final'} block, so the "
+            f"Adler-32 check is {'reached' if completing.final else 'skipped'}"
+        )
 
     # Stored, fixed and dynamic are three separate paths through an inflater,
     # and a fixture set that happened to cover only two of them would leave one
@@ -1120,15 +1244,97 @@ def check_rejected(fixture: Fixture) -> None:
         idat_offset, idat_length = find_chunk(fixture.png, b"IDAT")
         assert len(fixture.png) < idat_offset + idat_length
         return
+    if fixture.name in (
+        "reject_wrong_adler",
+        "reject_silent_corruption",
+        "reject_missing_adler",
+    ):
+        check_adler_rejected(fixture)
+        return
+    if fixture.name == "reject_extra_scanline":
+        check_extra_scanline(fixture)
+        return
     if fixture.name == "reject_corrupt_deflate":
         idat_offset, idat_length = find_chunk(fixture.png, b"IDAT")
         payload = fixture.png[idat_offset : idat_offset + idat_length]
         assert zlib.crc32(b"IDAT" + payload) & 0xFFFFFFFF == struct.unpack(
             ">I", fixture.png[idat_offset + idat_length : idat_offset + idat_length + 4]
         )[0], "corrupt fixture must still carry a valid chunk CRC"
-        assert not inflates_raw(payload), "corrupt fixture still inflates"
+        assert inflate_raw(payload) is None, "corrupt fixture still inflates"
         return
     raise AssertionError(f"no self-check for {fixture.name}")
+
+
+def check_extra_scanline(fixture: Fixture) -> None:
+    """The overrun fixture overruns, and is otherwise beyond reproach.
+
+    Each assertion here closes off one other way the decoder could refuse it. If
+    any of them stopped holding, the fixture would still be rejected and its test
+    would still pass, while no longer saying anything about the row-count guard.
+    """
+    assert fixture.expected_raw is not None, fixture.name
+    stream = idat_stream(fixture.png)
+    inflated = inflate_raw(stream)
+    assert inflated is not None, "must inflate: nothing structural may refuse it"
+
+    row_bytes = 1 + fixture.width * 3
+    declared = len(fixture.expected_raw)
+    assert declared == fixture.height * row_bytes, "expected_raw is not the raster"
+    assert len(inflated) == declared + row_bytes, "not exactly one row too long"
+    assert inflated[:declared] == fixture.expected_raw, "declared rows must be intact"
+    assert inflated[declared] <= 4, "extra row's filter byte must not be the reason"
+
+    # The checksum covers the over-long data, so it agrees with the stream and
+    # cannot be what refuses the image.
+    stored = struct.unpack(">I", stream[-4:])[0]
+    assert stored == zlib.adler32(inflated) & 0xFFFFFFFF, "trailer must be valid"
+
+    # And the rows it does declare are the pixels the suite will compare against.
+    assert fixture.pixels is not None, fixture.name
+    assert (
+        unfilter_all(fixture.expected_raw, fixture.width, fixture.height, 3)
+        == fixture.pixels
+    ), "declared raster does not match the emitted expectation"
+
+
+def check_adler_rejected(fixture: Fixture) -> None:
+    """The checksum fixtures are damaged in the checksum, not in the structure.
+
+    Each one has to fail for exactly one reason and no other, or it stops being
+    evidence about the Adler-32 code: the image data must still inflate, the
+    raster must still be complete, and the decoder must actually get as far as
+    reading the trailer.
+    """
+    assert fixture.expected_raw is not None, fixture.name
+    stream = idat_stream(fixture.png)
+    inflated = inflate_raw(stream)
+    assert inflated is not None, f"{fixture.name} no longer inflates"
+
+    # Reaching the check is a precondition for every one of them: the decoder
+    # only compares the trailer if the raster finished inside a BFINAL block.
+    assert reaches_adler_check(stream, len(fixture.expected_raw)), (
+        f"{fixture.name} never reaches the adler-32 check"
+    )
+
+    if fixture.name == "reject_missing_adler":
+        assert inflated == fixture.expected_raw, "raster should be intact"
+        _, _, trailer_offset = deflate_blocks(stream)
+        assert trailer_offset == len(stream), "trailer bytes are still present"
+        return
+
+    stored = struct.unpack(">I", stream[-4:])[0]
+    true_adler = zlib.adler32(fixture.expected_raw) & 0xFFFFFFFF
+
+    if fixture.name == "reject_wrong_adler":
+        assert inflated == fixture.expected_raw, "only the trailer may differ"
+        assert stored != true_adler, "trailer still matches the data"
+        return
+
+    # reject_silent_corruption: the trailer is the encoder's own, the data moved.
+    assert stored == true_adler, "trailer must be the untouched original"
+    assert len(inflated) == len(fixture.expected_raw), "length must still match"
+    assert inflated != fixture.expected_raw, "data is not actually corrupted"
+    assert zlib.adler32(inflated) & 0xFFFFFFFF != stored, "checksum cannot catch it"
 
 
 # --- Header rendering --------------------------------------------------------
@@ -1273,12 +1479,15 @@ def main() -> int:
 
     for fixture in fixtures:
         kind = "reject" if fixture.rejected else "decode"
-        btype = ""
+        detail = ""
         if not fixture.rejected:
-            btype = f"  BTYPE {first_block_type(idat_stream(fixture.png))}"
+            adler = "adler checked" if fixture.verifies_adler else "adler SKIPPED"
+            detail = (
+                f"  BTYPE {first_block_type(idat_stream(fixture.png))}  {adler}"
+            )
         print(
-            f"{fixture.name:<24} {kind}  {fixture.width}x{fixture.height}"
-            f"  {len(fixture.png)} PNG bytes{btype}"
+            f"{fixture.name:<26} {kind}  {fixture.width}x{fixture.height}"
+            f"  {len(fixture.png)} PNG bytes{detail}"
         )
     print(f"wrote {OUT_H.relative_to(ROOT)} ({OUT_H.stat().st_size} bytes)")
     return 0

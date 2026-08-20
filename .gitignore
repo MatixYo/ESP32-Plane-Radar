@@ -1,5 +1,6 @@
 .pio
 .venv/
+__pycache__/
 compile_commands.json
 .clangd
 .cache/
