@@ -14,33 +14,41 @@
 #endif
 
 #include "config.h"
+#include "core/button_edges.h"
 #include "core/portal_params.h"
 #include "platform/device/pins.h"
 #include "core/settings.h"
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
 
+namespace {
+
+/**
+ * The ISR and the loop both feed this one tracker, and both sample the pin
+ * *inside* s_boot_mux so that the level, its timestamp and the state write
+ * cannot be split apart. Reading the pin outside the lock is what used to lose
+ * taps: the poll saw an idle level, a press-edge interrupt recorded the press,
+ * and the poll's own clear then erased it, leaving the release with no press
+ * to close.
+ *
+ * Calling flash-resident core::button code from the ISR is safe because the
+ * Arduino core builds this target with CONFIG_ARDUINO_ISR_IRAM unset, so the
+ * GPIO ISR service is not IRAM-registered and the interrupt cannot fire while
+ * the flash cache is off during an NVS commit. That same masking is why both
+ * edges of a tap can arrive as one late interrupt — sample() classifies that
+ * case from the release edge alone.
+ */
 portMUX_TYPE s_boot_mux = portMUX_INITIALIZER_UNLOCKED;
-volatile bool s_boot_tap_pending = false;
-volatile bool s_boot_is_down = false;
-volatile unsigned long s_boot_down_ms = 0;
-bool s_long_press_handled = false;
+core::button::Tracker s_tracker{};
 bool s_boot_interrupt_attached = false;
 
 void IRAM_ATTR onBootButtonIsr() {
-  const bool down = digitalRead(config::kBootPin) == LOW;
-  const unsigned long now = millis();
   portENTER_CRITICAL_ISR(&s_boot_mux);
-  if (down) {
-    s_boot_is_down = true;
-    s_boot_down_ms = now;
-  } else if (s_boot_is_down) {
-    const unsigned long held = now - s_boot_down_ms;
-    if (held >= config::kBootTapMinMs && held < config::kBootResetHoldMs) {
-      s_boot_tap_pending = true;
-    }
-    s_boot_is_down = false;
-  }
+  // Records the edge and nothing else. A hold is actioned from task context in
+  // bootButtonPollLongPress(), because wifiResetCredentialsAndReboot() paints a
+  // screen, writes NVS and calls esp_restart().
+  core::button::sample(s_tracker, digitalRead(config::kBootPin) == LOW,
+                       millis());
   portEXIT_CRITICAL_ISR(&s_boot_mux);
 }
 
@@ -53,8 +61,6 @@ void initBootButton() {
                   onBootButtonIsr, CHANGE);
   s_boot_interrupt_attached = true;
 }
-
-namespace {
 
 /** Separate from planeradar prefs (rangeInit) to avoid NVS handle conflicts. */
 constexpr char kWifiPrefsNamespace[] = "wifi";
@@ -378,37 +384,24 @@ bool wifiBootButtonPressed() {
 
 void bootButtonInit() { initBootButton(); }
 
-bool bootButtonConsumeTap() {
+bool bootButtonConsumeTap(unsigned long* tap_ms) {
   portENTER_CRITICAL(&s_boot_mux);
-  const bool tap = s_boot_tap_pending;
-  if (tap) {
-    s_boot_tap_pending = false;
-  }
+  const bool tap = core::button::popTap(s_tracker, tap_ms);
   portEXIT_CRITICAL(&s_boot_mux);
   return tap;
 }
 
 void bootButtonPollLongPress() {
-  if (wifiBootButtonPressed()) {
-    portENTER_CRITICAL(&s_boot_mux);
-    if (!s_boot_is_down) {
-      s_boot_is_down = true;
-      s_boot_down_ms = millis();
-    }
-    const unsigned long down_ms = s_boot_down_ms;
-    portEXIT_CRITICAL(&s_boot_mux);
-
-    if (!s_long_press_handled &&
-        millis() - down_ms >= config::kBootResetHoldMs) {
-      s_long_press_handled = true;
-      Serial.println("BOOT held — resetting WiFi");
-      wifiResetCredentialsAndReboot();
-    }
-  } else {
-    portENTER_CRITICAL(&s_boot_mux);
-    s_boot_is_down = false;
-    portEXIT_CRITICAL(&s_boot_mux);
-    s_long_press_handled = false;
+  portENTER_CRITICAL(&s_boot_mux);
+  core::button::sample(s_tracker, digitalRead(config::kBootPin) == LOW,
+                       millis());
+  const bool long_press = core::button::popLongPress(s_tracker);
+  portEXIT_CRITICAL(&s_boot_mux);
+  // Acted on outside the critical section: this branch draws, writes NVS and
+  // never returns.
+  if (long_press) {
+    Serial.println("BOOT held — resetting WiFi");
+    wifiResetCredentialsAndReboot();
   }
 }
 
@@ -426,13 +419,17 @@ bool wifiReconnect() {
 }
 
 void wifiLoop() {
+  // Unconditional, and before the portal is serviced: a long hold must reset
+  // WiFi with no link and no portal running just as well as with one, and must
+  // win over a slow request. This call may not return (hold -> reset ->
+  // restart), which is why nothing below it is required for correctness.
+  bootButtonPollLongPress();
   ensureWifiManager();
   if (wifiLinkUp()) {
     if (!s_wm.getWebPortalActive() && !s_wm.getConfigPortalActive()) {
       startLanWebPortal();
     }
     if (s_wm.getWebPortalActive() || s_wm.getConfigPortalActive()) {
-      bootButtonPollLongPress();
       s_wm.process();
     }
   } else {

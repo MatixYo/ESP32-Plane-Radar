@@ -50,6 +50,19 @@ Save callback: `onPortalParamsSaved()` → `core::portal::commit()` via `wm.setS
 | BOOT hold 3 s | `wifiResetCredentialsAndReboot()` |
 | BOOT at power-on (documented in README) | Same wipe path |
 
+## BOOT button seam
+
+Device: GPIO 9 active LOW, CHANGE interrupt plus poll both feed `core::button::Tracker` under `s_boot_mux`. Native: SPACE key on emulated GPIO 9, poll only.
+
+| API | Role |
+|-----|------|
+| `bootButtonInit()` | GPIO / keyboard setup |
+| `bootButtonPollLongPress()` | Sample pin, act on 3 s hold (`wifiResetCredentialsAndReboot`) |
+| `bootButtonConsumeTap(unsigned long* tap_ms)` | Pop oldest queued tap; `*tap_ms` is release-edge millis |
+| `core::button::sample/popTap/popLongPress` | Shared debounce, hold, and timestamp queue (host-tested in `test/test_button`) |
+
+Tap timestamps are recorded at the release edge, not at consume time, so gestures survive blocking HTTP and NVS flash windows. `main.cpp` drains the queue in `handleBootButton()` only — the HTTP poll hook calls `wifiLoop()` and must never dispatch gestures (PNG decoder borrows the frame sprite mid-tile).
+
 Wipe clears: WiFi creds, the airport list — back to `config::kDefaultSiteIdent` (`core::settings::clearLocation()`) — and km/runway/terrain prefs (`core::settings::unitsReset()`). Range preset index is **not** reset.
 
 ## WiFi TX power

@@ -39,6 +39,8 @@ char s_site_idents[kMaxSites][5] = {};
 size_t s_site_count = 0;
 uint8_t s_site_index = 0;
 
+CenterChangedFn s_center_changed_fn = nullptr;
+
 using KV = platform::KeyValueStore;
 
 /** Latitude within +/-90 and longitude within +/-180. */
@@ -113,8 +115,20 @@ void applyActiveSiteCoords() {
                    ap.ident);
     return;
   }
+
+  const double prev_lat = s_lat;
+  const double prev_lon = s_lon;
   s_lat = lat_v;
   s_lon = lon_v;
+
+  // Invalidate downstream caches (ADS-B aircraft and terrain retry gates)
+  // regardless of which path moved the centre — double-tap airport advance,
+  // portal save, or factory reset. Only fires when coordinates actually
+  // change, so portal saves preserving the active site avoid clearing stores.
+  if (s_center_changed_fn != nullptr &&
+      (s_lat != prev_lat || s_lon != prev_lon)) {
+    s_center_changed_fn();
+  }
 }
 
 void loadSitesFromStorage() {
@@ -194,6 +208,10 @@ void init() {
 double lat() { return s_lat; }
 
 double lon() { return s_lon; }
+
+void setCenterChangedFn(CenterChangedFn fn) {
+  s_center_changed_fn = fn;
+}
 
 void clearLocation() {
   KV::remove(kNsRadar, kKeySites);

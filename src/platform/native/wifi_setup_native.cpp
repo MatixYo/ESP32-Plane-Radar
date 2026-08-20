@@ -192,10 +192,10 @@ void wifiLoop() {
     return;  // See s_in_wifi_loop for why the nested call is dropped.
   }
   s_in_wifi_loop = true;
-  // Device order: the button is polled before the portal is serviced, so a
-  // long hold wins over a slow request. bootButtonPollLongPress() may not
-  // return (long hold -> reset -> exit), which is why nothing below it is
-  // required for correctness.
+  // Device order: the button is polled unconditionally, before the portal is
+  // serviced, so a long hold wins over a slow request and still works with no
+  // link. bootButtonPollLongPress() may not return (long hold -> reset ->
+  // exit), which is why nothing below it is required for correctness.
   bootButtonPollLongPress();
   portalServerPump();
   s_in_wifi_loop = false;

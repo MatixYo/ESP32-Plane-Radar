@@ -1,16 +1,16 @@
 # Findings 01 — Bugs and Correctness
 
-I read every non-generated source file under `src/` and `include/`, traced the terrain fetch state machine, the PNG decoder, the frame-compose path and the settings/portal path end to end, and ran `make test` (all three host envs green). **The headline result on the memory invariant is a negative: I could not find a code path that composes a frame while a tile is decoding.** The invariant holds by construction, for a specific reason worth recording — the poll hook `pollWifiAndTaps()` (`src/main.cpp:88`) deliberately calls only `gesture::tapPress()`, never `gesture::tapPoll()`, so no tap can be *dispatched* (and therefore no `radarDisplayDraw()` can run) from inside `HttpClient::get`. The two other draw entry points reachable from the poll hook (`statusScreenWifiReset` via `bootButtonPollLongPress`, and the WiFiManager `/paramsave` callback) write to `tft` or to NVS, never to `s_frame`'s pixel buffer, and every compose begins with `gfx.fillScreen()` so a dirty scratch region can never survive into a `pushSprite`. That `tapPress`/`tapPoll` split is load-bearing and non-obvious and deserves a comment. What I found instead is a silent permanent loss of the user's stored radar location on any repeat portal save, a retry gate that blocks the wrong view for a minute, three `millis() + timeout` absolute deadlines that break at the 49.7-day rollover, and a cluster of smaller malformed-input and no-FPU defects. Nothing I found is a memory-safety bug: I specifically tried and failed to break the Huffman table construction, the LZ77 distance bound, the scratch sizing and the `beginTile` reverse maps (see "Cleared").
+I read every non-generated source file under `src/` and `include/`, traced the terrain fetch state machine, the PNG decoder, the frame-compose path and the settings/portal path end to end, and ran `make test` (all three host envs green). **The headline result on the memory invariant is a negative: I could not find a code path that composes a frame while a tile is decoding.** The invariant holds by construction — the HTTP poll hook (`pollWifi()` in `src/main.cpp`) calls only `wifiLoop()` and never consumes taps or dispatches gestures, so no `radarDisplayDraw()` can run from inside `HttpClient::get`. Gesture drain and dispatch stay in `handleBootButton()` only. The two other draw entry points reachable from the poll hook (`statusScreenWifiReset` via `bootButtonPollLongPress`, and the WiFiManager `/paramsave` callback) write to `tft` or to NVS, never to `s_frame`'s pixel buffer, and every compose begins with `gfx.fillScreen()` so a dirty scratch region can never survive into a `pushSprite`.
 
 | ID | Severity | file:line | One-line claim |
 |----|----------|-----------|----------------|
 | BUG-01 | High | `src/core/portal_params.cpp:72` | A second portal save silently overwrites the stored manual radar location with the active site's coordinates, unrecoverably. |
-| BUG-02 | Medium | `src/core/terrain.cpp:391` | The terrain retry gate is keyed by range preset only, so switching *site* inherits a 60 s "no terrain" block from a different view. |
+| BUG-02 | Medium | `src/core/terrain.cpp:391` | ~~The terrain retry gate is keyed by range preset only, so switching *site* inherits a 60 s "no terrain" block from a different view.~~ **Fixed:** `core::settings::setCenterChangedFn` → `terrain::clear()` on any centre move. |
 | BUG-03 | Medium | `src/platform/device/http_arduino.cpp:35` | Three absolute `millis() + timeout` deadlines fail every HTTP request and every reconnect for a 10–15 s window at each 49.7-day `millis()` rollover. |
 | BUG-04 | Low | `src/platform/device/kv_nvs.cpp:60` | Every NVS write ignores its return value, so a failed persist is reported to the user as success. |
 | BUG-05 | Low | `src/core/geo.cpp:9` | Longitude is not normalised across the antimeridian, so a target 20 km east of a ±180° centre is drawn as a rim dot pointing 180° the wrong way. |
 | BUG-06 | Low | `src/core/adsb.cpp:258` | A partial aircraft list is published on a parse error, and the store has no staleness bound at all. |
-| BUG-07 | Low | `src/core/portal_params.cpp:147` | A portal-driven centre change does not clear the ADS-B store, unlike the double-tap path, so old traffic is plotted against the new centre. |
+| BUG-07 | Low | `src/core/portal_params.cpp:147` | ~~A portal-driven centre change does not clear the ADS-B store, unlike the double-tap path, so old traffic is plotted against the new centre.~~ **Fixed:** same centre-changed hook → `adsb::clear()`. |
 | BUG-08 | Low | `src/platform/png_decode.cpp:179` | `skip(length + 4)` overflows uint32 on a chunk length ≥ 0xFFFFFFFC, and chunk length is never checked against PNG's 2^31−1 limit. |
 | BUG-09 | Low | `src/platform/png_decode.cpp:150` | PNG height is never bounded (width is), so `PixelFn` can be handed `y > 255` despite the header calling those "tile-local coordinates". |
 | BUG-10 | Low | `src/ui/runway_overlay.cpp:275` | The `s_in_range` memo caches only hits and the range test takes a `sqrtf`, costing ~1700 needless library-call square roots per frame on an FPU-less core. |
@@ -90,6 +90,8 @@ src/core/terrain.cpp
 - **Confidence:** Confirmed (the unsigned rollover arithmetic at 392 is itself correct).
 - **Suggested fix:** Store `s_fail_lat`/`s_fail_lon` alongside `s_fail_range_index` and compare all three with the same `kCenterEpsilonDeg` test `gridReady()` uses. 16 extra bytes of static RAM, no heap, no float work in a hot loop.
 - **Is it pinned by an existing test?** No — and the closest test documents the gap: `test_the_retry_gate_belongs_to_the_view_that_failed` (`test/test_terrain_fetch/test_terrain_fetch.cpp:447`) varies only the range index (`kRange + 1`), never the centre.
+
+**Resolution (2026-08):** `core::settings::setCenterChangedFn()` fires from `applyActiveSiteCoords()` when lat/lon actually change. `main.cpp` registers a callback that calls `core::terrain::clear()`, which resets `s_fail_range_index` to `kNoRange` alongside the cached grid.
 
 ---
 
@@ -237,6 +239,8 @@ src/core/settings.cpp
 - **Confidence:** Confirmed.
 - **Suggested fix:** Move the invalidation to where the centre actually changes rather than to the gesture handler — a `void (*on_center_changed)()` hook set in `main.cpp` and fired from `applyActiveSiteCoords()`/`saveLocationFromStrings()` keeps `core::settings` free of `core/adsb.h`. No memory or FPU impact.
 - **Is it pinned by an existing test?** No.
+
+**Resolution (2026-08):** Invalidation moved to `applyActiveSiteCoords()` via `setCenterChangedFn()`; `main.cpp` clears ADS-B and terrain on every centre move (portal, double-tap, or reset). The double-tap handler no longer calls `adsb::clear()` directly.
 
 ---
 
@@ -430,7 +434,7 @@ src/core/terrain.cpp
 
 Recording these so a later pass does not spend the same time, and because several are exactly where the brief pointed.
 
-- **The compose-during-decode invariant.** Traced every caller of `radarDisplayDraw`/`radarDisplayRefreshAircraft` (6 sites, all in `main.cpp`) and every path reachable from `pollWifiAndTaps` on both destinations. No path composes into `s_frame` while `platform_png::decode` is on the stack. The mechanism is that the poll hook calls `gesture::tapPress` but not `gesture::tapPoll`; if that ever changes, `onRangeTap`/`onSiteTap` become reachable from inside a tile decode and this becomes Critical.
+- **The compose-during-decode invariant.** Traced every caller of `radarDisplayDraw`/`radarDisplayRefreshAircraft` (6 sites, all in `main.cpp`) and every path reachable from `pollWifi` on both destinations. No path composes into `s_frame` while `platform_png::decode` is on the stack. The poll hook no longer touches gesture state at all; tap drain/dispatch is confined to `handleBootButton()`.
 - **`Work` fits the scratch.** `2 * sizeof(Huffman)` (1216) + two 768-byte rows + the 32768-byte window = 35,520 ≤ `kScratchBytes` 35,840; the `static_assert` at `png_decode.cpp:53` guards it. `radarDisplayFrameScratch` correctly rejects `need_bytes > 115200`.
 - **Huffman table construction cannot index out of bounds.** `buildTable`'s `offsets` sum is bounded by `count`, and in `decodeSymbol` the invariant `code_len >= first_len` holds inductively (the continue condition is `code >= first + count`, and both sides double), so `code - first` is never negative even for an over-subscribed table. `index + (code - first)` is strictly below the total symbol count, hence below 288.
 - **LZ77 distance handling.** `kDistBase[29] + (2^13 − 1) == 32768 == kWindowSize` exactly, and `(written_ − 32768) & kWindowMask == written_ & kWindowMask` is precisely the slot holding the byte 32768 back. `distance > written_` correctly rejects reads of never-written window bytes.

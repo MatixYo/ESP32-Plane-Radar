@@ -76,6 +76,20 @@ void init();
 double lat();
 double lon();
 
+using CenterChangedFn = void (*)();
+
+/**
+ * Called whenever lat()/lon() actually move, from any path — the BOOT double
+ * tap, a portal save, or a credential wipe.
+ *
+ * The hook exists so cache invalidation stops depending on which code path
+ * moved the centre: the tap handler used to clear the ADS-B store by hand and
+ * the portal path did not, so a portal-driven move plotted stale traffic
+ * against the new centre. Kept as a function pointer to keep core::settings
+ * free of core/adsb.h and core/terrain.h.
+ */
+void setCenterChangedFn(CenterChangedFn fn);
+
 /** Drop the stored site list and revert to config::kDefaultSiteIdent. */
 void clearLocation();
 

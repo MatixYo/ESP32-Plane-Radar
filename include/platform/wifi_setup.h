@@ -22,7 +22,13 @@ void wifiLoop();
 bool wifiBootButtonPressed();
 /** GPIO + interrupt setup; call once early in setup(). */
 void bootButtonInit();
-/** Latched short tap (survives blocking HTTP/display work). */
-bool bootButtonConsumeTap();
+/**
+ * Pop the oldest latched tap; *tap_ms is the millis() of its release edge.
+ *
+ * Queued rather than flagged, and timestamped at the edge rather than here, so
+ * a gesture made while a blocking HTTP request holds the loop is classified by
+ * when it happened instead of by when it was finally consumed.
+ */
+bool bootButtonConsumeTap(unsigned long* tap_ms);
 /** Call each loop iteration; triggers WiFi reset on long hold. */
 void bootButtonPollLongPress();

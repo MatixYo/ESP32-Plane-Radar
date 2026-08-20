@@ -17,7 +17,7 @@ After Wi‑Fi is saved, the device reconnects automatically; the radar runs in t
 
 | Action | Effect |
 |--------|--------|
-| **Short tap** | Cycle range preset (10 → 20 → 40 → 80 NM); saved to flash (~500 ms after release, so a double tap does not also change range) |
+| **Short tap** | Cycle range preset (10 → 20 → 40 → 80 NM); saved to flash (~500 ms after release, so a double tap does not also change range). Refreshes aircraft within ~1 s so the wider fetch radius fills in promptly |
 | **Double tap** | Cycle configured airport sites (ICAO list from the portal); active code shown on the left of the radar |
 | **Hold 3 s** | Clear Wi‑Fi, location, airport list, units, and overlay toggles (runways and terrain back to on); reboot into setup portal |
 
