@@ -4,6 +4,7 @@
 Import("env")
 
 import os
+import shutil
 from os.path import join
 
 
@@ -55,6 +56,13 @@ def merge_firmware(source, target, env):
     ]
     print(f"Merging flash image -> {merged}")
     env.Execute(" ".join(f'"{c}"' if " " in c else c for c in cmd))
+
+    # Copy merged binary to release/ folder
+    release_dir = join(env.subst("$PROJECT_DIR"), "release")
+    os.makedirs(release_dir, exist_ok=True)
+    release_file = join(release_dir, "plane-radar-merged.bin")
+    shutil.copy2(merged, release_file)
+    print(f"Copied release binary -> {release_file}")
     return None
 
 

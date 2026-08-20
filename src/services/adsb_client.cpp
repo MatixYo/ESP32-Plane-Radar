@@ -213,27 +213,32 @@ const Aircraft* aircraftList() { return s_aircraft; }
 
 bool fetchRoute(const char* callsign, char* dest_iata_out, size_t dest_len) {
   if (callsign == nullptr || callsign[0] == '\0' || dest_iata_out == nullptr || dest_len == 0) {
+    Serial.println("route: invalid args");
     return false;
   }
 
   // Check cache first
   if (services::route_cache::lookup(callsign, dest_iata_out, dest_len)) {
+    Serial.printf("route: cache hit for %s -> %s\n", callsign, dest_iata_out);
     return true;
   }
 
   String url = kRouteApiBase;
   url += callsign;
+  Serial.printf("route: fetching %s\n", url.c_str());
 
   WiFiClientSecure client;
   client.setInsecure();
 
   HTTPClient http;
   if (!http.begin(client, url)) {
+    Serial.println("route: http.begin failed");
     return false;
   }
 
   http.setTimeout(kRequestTimeoutMs);
   const int code = performGetWithPoll(http);
+  Serial.printf("route: HTTP %d for %s\n", code, callsign);
   if (code == HTTP_CODE_NOT_FOUND) {
     // Unknown callsign — cache empty result so we don't hammer
     services::route_cache::store(callsign, "");
@@ -252,19 +257,24 @@ bool fetchRoute(const char* callsign, char* dest_iata_out, size_t dest_len) {
   }
   http.end();
 
+  Serial.printf("route: payload len=%d\n", payload.length());
+
   JsonDocument doc;
   const DeserializationError err = deserializeJson(doc, payload);
   if (err) {
+    Serial.printf("route: JSON error: %s\n", err.c_str());
     return false;
   }
 
   JsonObject flightroute = doc["response"]["flightroute"];
   if (flightroute.isNull()) {
+    Serial.printf("route: no flightroute in response for %s\n", callsign);
     services::route_cache::store(callsign, "");
     return false;
   }
 
   const char* dest_iata = flightroute["destination"]["iata_code"] | "";
+  Serial.printf("route: dest_iata='%s' for %s\n", dest_iata, callsign);
   services::route_cache::store(callsign, dest_iata);
 
   if (dest_iata[0] == '\0') {

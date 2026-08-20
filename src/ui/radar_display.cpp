@@ -408,6 +408,11 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane, bool s
   initTagLabelMetrics();
   applyTagStyle();
 
+  Serial.printf("tag: callsign='%s' dest='%s' show_dest=%d\n", 
+                plane.callsign[0] ? plane.callsign : "(none)",
+                plane.dest[0] ? plane.dest : "(none)",
+                show_dest);
+
   const int line_h = s_draw->fontHeight();
   const int block_w = measureTagBlockWidth(plane, show_dest);
   const int block_h = line_h * 3;
@@ -433,9 +438,11 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane, bool s
     s_draw->setTextColor(radar::kColorTagAltitude, radar::kColorBackground);
     char label[16];
     snprintf(label, sizeof(label), "\u2192 %s", plane.dest);
+    Serial.printf("tag: drawing dest label='%s'\n", label);
     s_draw->drawString(label, anchor_x, ly);
   } else if (plane.callsign[0] != '\0') {
     s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
+    Serial.printf("tag: drawing callsign='%s'\n", plane.callsign);
     s_draw->drawString(plane.callsign, anchor_x, ly);
   }
   ly += line_h;

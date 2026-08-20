@@ -63,15 +63,26 @@ void fetchAndDrawAircraft() {
   const size_t n = services::adsb::aircraftCount();
   services::adsb::Aircraft* planes = const_cast<services::adsb::Aircraft*>(
       services::adsb::aircraftList());
+  
+  Serial.printf("main: %u aircraft, checking routes...\n", static_cast<unsigned>(n));
+  
   for (size_t i = 0; i < n; ++i) {
+    Serial.printf("main: plane[%u] callsign='%s' dest='%s'\n", 
+                  static_cast<unsigned>(i), 
+                  planes[i].callsign[0] ? planes[i].callsign : "(none)",
+                  planes[i].dest[0] ? planes[i].dest : "(unknown)");
     if (planes[i].callsign[0] == '\0') continue;
     if (planes[i].dest[0] != '\0') continue;  // Already known
 
     char fetched_dest[5] = {};
+    Serial.printf("main: fetching route for %s\n", planes[i].callsign);
     if (services::adsb::fetchRoute(planes[i].callsign, fetched_dest, sizeof(fetched_dest))) {
+      Serial.printf("main: got dest %s for %s\n", fetched_dest, planes[i].callsign);
       strncpy(planes[i].dest, fetched_dest, sizeof(planes[i].dest) - 1);
       planes[i].dest[sizeof(planes[i].dest) - 1] = '\0';
       planes[i].dest_fetched_ms = millis();
+    } else {
+      Serial.printf("main: route fetch failed for %s\n", planes[i].callsign);
     }
     break;  // One lookup per cycle
   }
