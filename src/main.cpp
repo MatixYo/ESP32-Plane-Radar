@@ -5,10 +5,14 @@
 #include <Arduino.h>
 #include <WiFi.h>
 
+#include <cstring>
+
 #include "config.h"
 #include "hardware/display.h"
 #include "services/adsb_client.h"
+#include "services/airport_cache.h"
 #include "services/radar_location.h"
+#include "services/route_cache.h"
 #include "services/wifi_setup.h"
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
@@ -49,6 +53,50 @@ void handleBootButton() {
   }
 }
 
+bool planeNeedsRouteLookup(const services::adsb::Aircraft& plane) {
+  if (plane.callsign[0] == '\0') {
+    return false;
+  }
+  if (plane.origin[0] != '\0' || plane.origin_name[0] != '\0' ||
+      plane.dest[0] != '\0' || plane.dest_name[0] != '\0') {
+    return false;
+  }
+  if (!services::route_cache::contains(plane.callsign)) {
+    return true;
+  }
+  services::route_cache::RouteInfo info;
+  services::route_cache::clearRouteInfo(&info);
+  if (!services::route_cache::lookup(plane.callsign, &info)) {
+    return true;
+  }
+  // Cached ICAO without names — retry airport decode.
+  const bool origin_pending =
+      info.origin_icao[0] != '\0' && info.origin_iata[0] == '\0' &&
+      info.origin_name[0] == '\0';
+  const bool dest_pending = info.dest_icao[0] != '\0' &&
+                            info.dest_iata[0] == '\0' && info.dest_name[0] == '\0';
+  return origin_pending || dest_pending;
+}
+
+void applyRouteInfo(services::adsb::Aircraft* plane,
+                    const services::route_cache::RouteInfo& info) {
+  strncpy(plane->origin, info.origin_iata, sizeof(plane->origin) - 1);
+  plane->origin[sizeof(plane->origin) - 1] = '\0';
+  strncpy(plane->origin_icao, info.origin_icao, sizeof(plane->origin_icao) - 1);
+  plane->origin_icao[sizeof(plane->origin_icao) - 1] = '\0';
+  strncpy(plane->origin_name, info.origin_name, sizeof(plane->origin_name) - 1);
+  plane->origin_name[sizeof(plane->origin_name) - 1] = '\0';
+  strncpy(plane->dest, info.dest_iata, sizeof(plane->dest) - 1);
+  plane->dest[sizeof(plane->dest) - 1] = '\0';
+  strncpy(plane->dest_icao, info.dest_icao, sizeof(plane->dest_icao) - 1);
+  plane->dest_icao[sizeof(plane->dest_icao) - 1] = '\0';
+  strncpy(plane->dest_name, info.dest_name, sizeof(plane->dest_name) - 1);
+  plane->dest_name[sizeof(plane->dest_name) - 1] = '\0';
+  if (services::route_cache::routeHasDisplay(info)) {
+    plane->route_fetched_ms = millis();
+  }
+}
+
 void fetchAndDrawAircraft() {
   const float fetch_km = ui::radar::fetchRadiusKm();
   if (!services::adsb::fetchUpdate(services::location::lat(),
@@ -57,34 +105,33 @@ void fetchAndDrawAircraft() {
     return;
   }
 
-  // After successful aircraft fetch, try to resolve destinations for
-  // any planes we don't yet have route info for. Limit to one route
-  // lookup per refresh cycle to avoid hammering the API.
   const size_t n = services::adsb::aircraftCount();
   services::adsb::Aircraft* planes = const_cast<services::adsb::Aircraft*>(
       services::adsb::aircraftList());
-  
-  Serial.printf("main: %u aircraft, checking routes...\n", static_cast<unsigned>(n));
-  
-  for (size_t i = 0; i < n; ++i) {
-    Serial.printf("main: plane[%u] callsign='%s' dest='%s'\n", 
-                  static_cast<unsigned>(i), 
-                  planes[i].callsign[0] ? planes[i].callsign : "(none)",
-                  planes[i].dest[0] ? planes[i].dest : "(unknown)");
-    if (planes[i].callsign[0] == '\0') continue;
-    if (planes[i].dest[0] != '\0') continue;  // Already known
 
-    char fetched_dest[5] = {};
-    Serial.printf("main: fetching route for %s\n", planes[i].callsign);
-    if (services::adsb::fetchRoute(planes[i].callsign, fetched_dest, sizeof(fetched_dest))) {
-      Serial.printf("main: got dest %s for %s\n", fetched_dest, planes[i].callsign);
-      strncpy(planes[i].dest, fetched_dest, sizeof(planes[i].dest) - 1);
-      planes[i].dest[sizeof(planes[i].dest) - 1] = '\0';
-      planes[i].dest_fetched_ms = millis();
-    } else {
-      Serial.printf("main: route fetch failed for %s\n", planes[i].callsign);
+  for (size_t i = 0; i < n; ++i) {
+    if (!planeNeedsRouteLookup(planes[i])) {
+      continue;
     }
-    break;  // One lookup per cycle
+
+    services::route_cache::RouteInfo info;
+    services::route_cache::clearRouteInfo(&info);
+    Serial.printf("main: fetching route for %s\n", planes[i].callsign);
+    if (services::adsb::fetchRoute(planes[i].callsign, &info)) {
+      applyRouteInfo(&planes[i], info);
+      Serial.printf("main: %s  %s -> %s\n", planes[i].callsign,
+                    planes[i].origin[0] ? planes[i].origin
+                                        : (planes[i].origin_name[0]
+                                               ? planes[i].origin_name
+                                               : "?"),
+                    planes[i].dest[0] ? planes[i].dest
+                                      : (planes[i].dest_name[0]
+                                             ? planes[i].dest_name
+                                             : "?"));
+    } else {
+      Serial.printf("main: no route for %s\n", planes[i].callsign);
+    }
+    break;
   }
 
   ui::radarDisplayRefreshAircraft();
@@ -101,6 +148,7 @@ void setup() {
 
   bootButtonInit();
   displayInit();
+  services::airport_cache::init();
   if (wifiShowsSetupScreenOnBoot()) {
     statusScreenPortal();
   }

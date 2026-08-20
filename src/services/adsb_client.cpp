@@ -1,5 +1,6 @@
 #include "services/adsb_client.h"
 
+#include <ESP.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 
@@ -8,17 +9,21 @@
 #include <cstring>
 
 #include "config.h"
+#include "services/airport_cache.h"
 #include "services/route_cache.h"
+#include "ui/radar_display.h"
 
 namespace services::adsb {
 
 namespace {
 
 constexpr char kApiBase[] = "https://opendata.adsb.fi/api/v3/lat/";
-constexpr char kRouteApiBase[] = "https://api.adsbdb.com/v1/callsign/";
+constexpr char kRouteApiBase[] = "https://hexdb.io/api/v1/route/icao/";
+constexpr char kAirportApiBase[] = "https://hexdb.io/api/v1/airport/icao/";
 constexpr float kKmPerNm = 1.852f;
-constexpr int kConnectAttemptMs = 200;
-constexpr unsigned long kRequestTimeoutMs = 10000;
+constexpr int kConnectAttemptMs = 10000;
+constexpr unsigned long kRequestTimeoutMs = 15000;
+constexpr int kHttpsAttempts = 2;
 
 Aircraft s_aircraft[kMaxAircraft];
 size_t s_aircraft_count = 0;
@@ -30,22 +35,12 @@ void pollNetwork() {
   }
 }
 
-int performGetWithPoll(HTTPClient& http) {
-  http.setConnectTimeout(kConnectAttemptMs);
-  const unsigned long deadline = millis() + kRequestTimeoutMs;
-  while (millis() < deadline) {
-    pollNetwork();
-    const int code = http.GET();
-    if (code > 0) {
-      return code;
-    }
-    if (code != HTTPC_ERROR_CONNECTION_REFUSED &&
-        code != HTTPC_ERROR_NOT_CONNECTED) {
-      return code;
-    }
-    delay(5);
-  }
-  return HTTPC_ERROR_READ_TIMEOUT;
+void prepareHttpsHeap() {
+  // 240×240 RGB565 sprite ≈ 112 KB — free it so mbedTLS can allocate.
+  ui::radarDisplaySuspendFrameBuffer();
+  Serial.printf("https: heap free=%u maxblk=%u\n",
+                static_cast<unsigned>(ESP.getFreeHeap()),
+                static_cast<unsigned>(ESP.getMaxAllocHeap()));
 }
 
 bool readResponseBodyWithPoll(HTTPClient& http, String& payload) {
@@ -85,6 +80,47 @@ bool readResponseBodyWithPoll(HTTPClient& http, String& payload) {
   }
 
   return payload.length() > 0;
+}
+
+/**
+ * One TLS session per attempt. Does not hammer GET() on a dead client —
+ * that was spamming SSL -32512 (OOM) in the log.
+ */
+bool httpsGetPayload(const String& url, String& payload, int* http_code_out) {
+  prepareHttpsHeap();
+  payload = "";
+
+  for (int attempt = 1; attempt <= kHttpsAttempts; ++attempt) {
+    pollNetwork();
+    WiFiClientSecure client;
+    client.setInsecure();
+
+    HTTPClient http;
+    if (!http.begin(client, url)) {
+      Serial.printf("https: begin failed (%s)\n", url.c_str());
+      delay(200);
+      continue;
+    }
+    http.setConnectTimeout(kConnectAttemptMs);
+    http.setTimeout(kRequestTimeoutMs);
+    http.setReuse(false);
+
+    const int code = http.GET();
+    if (http_code_out != nullptr) {
+      *http_code_out = code;
+    }
+
+    if (code == HTTP_CODE_OK) {
+      const bool ok = readResponseBodyWithPoll(http, payload);
+      http.end();
+      return ok;
+    }
+
+    Serial.printf("https: HTTP %d attempt %d/%d\n", code, attempt, kHttpsAttempts);
+    http.end();
+    delay(250 * attempt);
+  }
+  return false;
 }
 
 float kmToNauticalMiles(float km) { return km / kKmPerNm; }
@@ -189,6 +225,46 @@ void formatAltitudeTag(const JsonObject& plane, char* out, size_t out_len) {
   }
 }
 
+void copyField(char* out, size_t out_len, const char* src) {
+  if (out == nullptr || out_len == 0) {
+    return;
+  }
+  if (src == nullptr) {
+    out[0] = '\0';
+    return;
+  }
+  strncpy(out, src, out_len - 1);
+  out[out_len - 1] = '\0';
+}
+
+void shortenAirportName(const char* full, char* out, size_t out_len) {
+  if (out == nullptr || out_len == 0) {
+    return;
+  }
+  out[0] = '\0';
+  if (full == nullptr || full[0] == '\0') {
+    return;
+  }
+  copyField(out, out_len, full);
+
+  static const char* kSuffixes[] = {
+      " International Airport",
+      " International",
+      " Airport",
+      " Airfield",
+      " Aerodrome",
+  };
+  for (const char* suffix : kSuffixes) {
+    const size_t name_len = strlen(out);
+    const size_t suffix_len = strlen(suffix);
+    if (name_len > suffix_len &&
+        strcasecmp(out + name_len - suffix_len, suffix) == 0) {
+      out[name_len - suffix_len] = '\0';
+      break;
+    }
+  }
+}
+
 void fillTagFields(Aircraft* ac, const JsonObject& plane) {
   copyJsonStringTrimmed(plane, "flight", ac->callsign, sizeof(ac->callsign));
   if (ac->callsign[0] == '\0') {
@@ -198,9 +274,128 @@ void fillTagFields(Aircraft* ac, const JsonObject& plane) {
   copyJsonStringTrimmed(plane, "t", ac->type, sizeof(ac->type));
   formatAltitudeTag(plane, ac->alt, sizeof(ac->alt));
 
-  // Reset route fields
+  ac->origin[0] = '\0';
+  ac->origin_icao[0] = '\0';
+  ac->origin_name[0] = '\0';
   ac->dest[0] = '\0';
-  ac->dest_fetched_ms = 0;
+  ac->dest_icao[0] = '\0';
+  ac->dest_name[0] = '\0';
+  ac->route_fetched_ms = 0;
+}
+
+bool httpGetJson(const char* url, JsonDocument& doc) {
+  String payload;
+  int code = 0;
+  if (!httpsGetPayload(url, payload, &code)) {
+    Serial.printf("route: HTTP %d for %s\n", code, url);
+    return false;
+  }
+
+  const DeserializationError err = deserializeJson(doc, payload);
+  if (err) {
+    Serial.printf("route: JSON error: %s\n", err.c_str());
+    return false;
+  }
+  return true;
+}
+
+bool resolveAirport(const char* icao_code, char* iata_out, size_t iata_len,
+                    char* name_out, size_t name_len) {
+  if (icao_code == nullptr || icao_code[0] == '\0') {
+    return false;
+  }
+
+  char iata[5] = {};
+  char name[28] = {};
+  if (services::airport_cache::lookup(icao_code, iata, sizeof(iata), name,
+                                      sizeof(name))) {
+    copyField(iata_out, iata_len, iata);
+    copyField(name_out, name_len, name);
+    return iata[0] != '\0' || name[0] != '\0';
+  }
+
+  String url = kAirportApiBase;
+  url += icao_code;
+  Serial.printf("route: airport fetch %s\n", url.c_str());
+
+  JsonDocument doc;
+  if (!httpGetJson(url.c_str(), doc)) {
+    return false;
+  }
+
+  const char* api_iata = doc["iata"] | "";
+  const char* api_name = doc["airport"] | "";
+  shortenAirportName(api_name, name, sizeof(name));
+  copyField(iata, sizeof(iata), api_iata);
+
+  services::airport_cache::store(icao_code, iata, name);
+  copyField(iata_out, iata_len, iata);
+  copyField(name_out, name_len, name);
+  return iata[0] != '\0' || name[0] != '\0';
+}
+
+bool airportNeedsDecode(const char* icao, const char* iata, const char* name) {
+  return icao[0] != '\0' && iata[0] == '\0' && name[0] == '\0';
+}
+
+void fillMissingAirportNames(services::route_cache::RouteInfo* info) {
+  if (info == nullptr) {
+    return;
+  }
+  if (airportNeedsDecode(info->origin_icao, info->origin_iata, info->origin_name)) {
+    resolveAirport(info->origin_icao, info->origin_iata, sizeof(info->origin_iata),
+                   info->origin_name, sizeof(info->origin_name));
+  }
+  if (airportNeedsDecode(info->dest_icao, info->dest_iata, info->dest_name)) {
+    resolveAirport(info->dest_icao, info->dest_iata, sizeof(info->dest_iata),
+                   info->dest_name, sizeof(info->dest_name));
+  }
+}
+
+void applyRouteToAircraft(Aircraft* ac, const services::route_cache::RouteInfo& info) {
+  copyField(ac->origin, sizeof(ac->origin), info.origin_iata);
+  copyField(ac->origin_icao, sizeof(ac->origin_icao), info.origin_icao);
+  copyField(ac->origin_name, sizeof(ac->origin_name), info.origin_name);
+  copyField(ac->dest, sizeof(ac->dest), info.dest_iata);
+  copyField(ac->dest_icao, sizeof(ac->dest_icao), info.dest_icao);
+  copyField(ac->dest_name, sizeof(ac->dest_name), info.dest_name);
+  if (services::route_cache::routeHasDisplay(info)) {
+    ac->route_fetched_ms = millis();
+  }
+}
+
+void applyCachedRoute(Aircraft* ac) {
+  services::route_cache::RouteInfo info;
+  services::route_cache::clearRouteInfo(&info);
+  if (!services::route_cache::lookup(ac->callsign, &info)) {
+    return;
+  }
+  applyRouteToAircraft(ac, info);
+}
+
+bool parseRouteIcaos(const char* route, char* origin_icao, size_t origin_len,
+                     char* dest_icao, size_t dest_len) {
+  if (route == nullptr || route[0] == '\0' || origin_icao == nullptr ||
+      dest_icao == nullptr || origin_len == 0 || dest_len == 0) {
+    return false;
+  }
+  origin_icao[0] = '\0';
+  dest_icao[0] = '\0';
+
+  const char* first_dash = strchr(route, '-');
+  const char* last_dash = strrchr(route, '-');
+  if (first_dash == nullptr || last_dash == nullptr || last_dash[1] == '\0') {
+    return false;
+  }
+
+  const size_t origin_n = static_cast<size_t>(first_dash - route);
+  if (origin_n == 0 || origin_n >= origin_len) {
+    return false;
+  }
+  memcpy(origin_icao, route, origin_n);
+  origin_icao[origin_n] = '\0';
+  copyField(dest_icao, dest_len, last_dash + 1);
+  return origin_icao[0] != '\0' && dest_icao[0] != '\0';
 }
 
 }  // namespace
@@ -211,53 +406,50 @@ size_t aircraftCount() { return s_aircraft_count; }
 
 const Aircraft* aircraftList() { return s_aircraft; }
 
-bool fetchRoute(const char* callsign, char* dest_iata_out, size_t dest_len) {
-  if (callsign == nullptr || callsign[0] == '\0' || dest_iata_out == nullptr || dest_len == 0) {
-    Serial.println("route: invalid args");
+bool fetchRoute(const char* callsign, services::route_cache::RouteInfo* out) {
+  if (callsign == nullptr || callsign[0] == '\0' || out == nullptr) {
     return false;
   }
+  services::route_cache::clearRouteInfo(out);
 
-  // Check cache first
-  if (services::route_cache::lookup(callsign, dest_iata_out, dest_len)) {
-    Serial.printf("route: cache hit for %s -> %s\n", callsign, dest_iata_out);
-    return true;
+  services::route_cache::RouteInfo cached;
+  services::route_cache::clearRouteInfo(&cached);
+  if (services::route_cache::lookup(callsign, &cached)) {
+    fillMissingAirportNames(&cached);
+    if (airportNeedsDecode(cached.origin_icao, cached.origin_iata,
+                           cached.origin_name) ||
+        airportNeedsDecode(cached.dest_icao, cached.dest_iata, cached.dest_name)) {
+      // Still missing names after retry — keep ICAOs cached.
+      services::route_cache::store(callsign, cached);
+    } else if (services::route_cache::routeHasDisplay(cached) ||
+               cached.origin_icao[0] != '\0' || cached.dest_icao[0] != '\0') {
+      services::route_cache::store(callsign, cached);
+    }
+    *out = cached;
+    Serial.printf("route: cache hit %s  %s -> %s\n", callsign,
+                  cached.origin_iata[0] ? cached.origin_iata
+                                       : (cached.origin_icao[0] ? cached.origin_icao
+                                                                : "?"),
+                  cached.dest_iata[0] ? cached.dest_iata
+                                     : (cached.dest_icao[0] ? cached.dest_icao : "?"));
+    return services::route_cache::routeHasDisplay(cached);
   }
 
   String url = kRouteApiBase;
   url += callsign;
   Serial.printf("route: fetching %s\n", url.c_str());
 
-  WiFiClientSecure client;
-  client.setInsecure();
-
-  HTTPClient http;
-  if (!http.begin(client, url)) {
-    Serial.println("route: http.begin failed");
-    return false;
-  }
-
-  http.setTimeout(kRequestTimeoutMs);
-  const int code = performGetWithPoll(http);
-  Serial.printf("route: HTTP %d for %s\n", code, callsign);
-  if (code == HTTP_CODE_NOT_FOUND) {
-    // Unknown callsign — cache empty result so we don't hammer
-    services::route_cache::store(callsign, "");
-    http.end();
-    return false;
-  }
-  if (code != HTTP_CODE_OK) {
-    http.end();
-    return false;
-  }
-
   String payload;
-  if (!readResponseBodyWithPoll(http, payload)) {
-    http.end();
+  int code = 0;
+  if (!httpsGetPayload(url, payload, &code)) {
+    Serial.printf("route: HTTP %d for %s\n", code, callsign);
+    if (code == HTTP_CODE_NOT_FOUND) {
+      services::route_cache::RouteInfo empty;
+      services::route_cache::clearRouteInfo(&empty);
+      services::route_cache::store(callsign, empty);
+    }
     return false;
   }
-  http.end();
-
-  Serial.printf("route: payload len=%d\n", payload.length());
 
   JsonDocument doc;
   const DeserializationError err = deserializeJson(doc, payload);
@@ -266,24 +458,36 @@ bool fetchRoute(const char* callsign, char* dest_iata_out, size_t dest_len) {
     return false;
   }
 
-  JsonObject flightroute = doc["response"]["flightroute"];
-  if (flightroute.isNull()) {
-    Serial.printf("route: no flightroute in response for %s\n", callsign);
-    services::route_cache::store(callsign, "");
+  if (doc["status"].is<const char*>() || doc["error"].is<const char*>()) {
+    services::route_cache::RouteInfo empty;
+    services::route_cache::clearRouteInfo(&empty);
+    services::route_cache::store(callsign, empty);
     return false;
   }
 
-  const char* dest_iata = flightroute["destination"]["iata_code"] | "";
-  Serial.printf("route: dest_iata='%s' for %s\n", dest_iata, callsign);
-  services::route_cache::store(callsign, dest_iata);
-
-  if (dest_iata[0] == '\0') {
+  const char* route = doc["route"] | "";
+  services::route_cache::RouteInfo info;
+  services::route_cache::clearRouteInfo(&info);
+  if (!parseRouteIcaos(route, info.origin_icao, sizeof(info.origin_icao),
+                       info.dest_icao, sizeof(info.dest_icao))) {
+    services::route_cache::store(callsign, info);
     return false;
   }
 
-  strncpy(dest_iata_out, dest_iata, dest_len - 1);
-  dest_iata_out[dest_len - 1] = '\0';
-  return true;
+  resolveAirport(info.origin_icao, info.origin_iata, sizeof(info.origin_iata),
+                 info.origin_name, sizeof(info.origin_name));
+  resolveAirport(info.dest_icao, info.dest_iata, sizeof(info.dest_iata),
+                 info.dest_name, sizeof(info.dest_name));
+
+  Serial.printf("route: %s  %s (%s) -> %s (%s)\n", callsign,
+                info.origin_iata[0] ? info.origin_iata : info.origin_icao,
+                info.origin_name[0] ? info.origin_name : "-",
+                info.dest_iata[0] ? info.dest_iata : info.dest_icao,
+                info.dest_name[0] ? info.dest_name : "-");
+
+  services::route_cache::store(callsign, info);
+  *out = info;
+  return services::route_cache::routeHasDisplay(info);
 }
 
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
@@ -296,30 +500,12 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   url += "/dist/";
   url += String(dist_nm, 1);
 
-  WiFiClientSecure client;
-  client.setInsecure();
-
-  HTTPClient http;
-  if (!http.begin(client, url)) {
-    Serial.println("adsb: http.begin failed");
-    return false;
-  }
-
-  http.setTimeout(kRequestTimeoutMs);
-  const int code = performGetWithPoll(http);
-  if (code != HTTP_CODE_OK) {
-    Serial.printf("adsb: HTTP %d\n", code);
-    http.end();
-    return false;
-  }
-
   String payload;
-  if (!readResponseBodyWithPoll(http, payload)) {
-    Serial.println("adsb: empty response");
-    http.end();
+  int code = 0;
+  if (!httpsGetPayload(url, payload, &code)) {
+    Serial.printf("adsb: HTTP %d\n", code);
     return false;
   }
-  http.end();
 
   JsonDocument doc;
   const DeserializationError err = deserializeJson(doc, payload);
@@ -352,12 +538,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     s_aircraft[n].track_deg = pickTrackHeading(plane);
     s_aircraft[n].gs_knots = pickGroundSpeed(plane);
     fillTagFields(&s_aircraft[n], plane);
-
-    // Try to populate destination from cache (don't HTTP here — batch later)
-    services::route_cache::lookup(s_aircraft[n].callsign, s_aircraft[n].dest, sizeof(s_aircraft[n].dest));
-    if (s_aircraft[n].dest[0] != '\0') {
-      s_aircraft[n].dest_fetched_ms = millis();
-    }
+    applyCachedRoute(&s_aircraft[n]);
 
     ++n;
   }

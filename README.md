@@ -10,8 +10,9 @@ Firmware for an **ESP32-C3 Super Mini** and a **1.28″ round GC9A01** display (
 
 1. **Wi‑Fi setup** (if needed) — captive portal on AP **`PlaneRadar-Setup`**
 2. **Radar** — live aircraft from [adsb.fi](https://opendata.adsb.fi/) on a sonar-style grid
+3. **Flight routes** — origin and destination from [hexdb.io](https://hexdb.io/) (callsign → route), with airport names cached on flash
 
-After Wi‑Fi is saved, the device reconnects automatically; the radar runs in the main loop with periodic ADS-B updates (~5 s).
+After Wi‑Fi is saved, the device reconnects automatically; the radar runs in the main loop with periodic ADS-B updates (`kAdsbFetchIntervalMs` in `config.h`, currently ~3 s).
 
 ## Controls (BOOT, GPIO 9, active LOW)
 
@@ -76,18 +77,43 @@ Preset and miles/km choice persist across reboot (`planeradar` NVS namespace).
 
 ### Aircraft
 
-- **Inside the outer ring** — red heading triangle, magenta speed vector (clipped at the ring), callsign / type / altitude tags
+- **Inside the outer ring** — red heading triangle, speed vector (clipped at the ring), and a three-line tag
 - **Outside the ring** (still within ADS-B fetch) — small **red dot on the screen rim** at the correct bearing (direction cue; not distance-accurate past the ring)
 - **Tags** — placed toward the **center**: west (left) → tag on the **right** of the symbol; east (right) → tag on the **left**
 
+Tag lines update every ADS-B refresh cycle:
+
+| Line | Cycles through |
+|------|----------------|
+| 1 | **Callsign** → **origin** (`^` + short airport name or IATA) → **destination** (`>` + name or IATA) |
+| 2 | Aircraft **type** (fixed) |
+| 3 | **Altitude** ↔ **ground speed** (e.g. `420 kt`) |
+
+If origin/destination is unknown for a plane, line 1 falls back to the callsign on those frames. Speed falls back to altitude when ground speed is unavailable.
+
 As range decreases (or aircraft approach), targets move inward; beyond-ring dots become full symbols when they cross the outer ring.
+
+### Flight routes (hexdb)
+
+ADS-B does not include origin/destination. After each aircraft update, the firmware resolves **at most one** unknown callsign per cycle via [hexdb.io](https://hexdb.io/):
+
+1. `GET https://hexdb.io/api/v1/route/icao/{callsign}` → e.g. `EGAA-EGNX`
+2. `GET https://hexdb.io/api/v1/airport/icao/{icao}` → IATA + airport name (shortened for the tag)
+
+Caching:
+
+- **Route cache (RAM)** — callsign → origin/destination (IATA, ICAO, short name); ~10 min TTL; negative results cached so unknown callsigns are not re-queried every cycle
+- **Airport cache (LittleFS)** — ICAO → IATA + name on the SPIFFS/LittleFS partition; survives reboot
+
+Coverage is best-effort (airline/charter callsigns in hexdb); many GA flights have no route entry.
 
 ### ADS-B
 
 - Source: `https://opendata.adsb.fi/api/v3/`
 - Fetch radius: `ui::radar::fetchRadiusKm()` — scales with the active preset to roughly the screen edge (so rim dots have data)
-- Poll interval: `kAdsbFetchIntervalMs` (5 s) in `config.h`
+- Poll interval: `kAdsbFetchIntervalMs` (3 s) in `config.h`
 - Ground aircraft hidden by default (`kAdsbShowGroundAircraft`)
+- HTTPS temporarily releases the off-screen frame buffer so TLS can allocate on the ESP32-C3; the 8-bit sprite is recreated afterward
 
 ## Configuration
 
@@ -125,10 +151,14 @@ include/
     wifi_setup.h
     radar_location.h
     adsb_client.h
+    route_cache.h       — RAM callsign → origin/dest
+    airport_cache.h     — LittleFS ICAO → IATA/name
 data/
   ui_font.vlw              — embedded smooth UI font (Noto Sans Bold)
 scripts/
   build_large_airports.py
+  merge-firmware.sh
+  merge_firmware.py
 src/
   main.cpp
   data/
@@ -136,6 +166,8 @@ src/
   hardware/
   ui/
   services/
+partitions/
+  plane_radar.csv          — app + LittleFS (spiffs subtype) + coredump
 ```
 
 ## Wiring (GC9A01 ↔ ESP32-C3 Super Mini)
@@ -161,6 +193,7 @@ pio device monitor
 - PlatformIO env: **`supermini`**
 - Serial: **115200** baud
 - USB CDC on boot enabled in `platformio.ini` for the Super Mini
+- Filesystem: **LittleFS** on the partition labeled `spiffs` (`board_build.filesystem = littlefs`) for the airport name cache
 
 ### Web-flashable release image
 
@@ -207,3 +240,8 @@ The release workflow builds firmware in CI and attaches the merged image to the 
 - [LovyanGFX](https://github.com/lovyan03/LovyanGFX)
 - [WiFiManager](https://github.com/tzapu/WiFiManager)
 - [ArduinoJson](https://github.com/bblanchon/ArduinoJson)
+
+External data APIs (runtime HTTPS):
+
+- [adsb.fi open data](https://opendata.adsb.fi/) — live aircraft positions
+- [hexdb.io](https://hexdb.io/) — callsign routes and airport decode

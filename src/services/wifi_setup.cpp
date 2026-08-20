@@ -264,6 +264,28 @@ void prepareSta() {
   WiFi.setAutoReconnect(true);
 }
 
+/** Prefer public DNS — router DNS is a common cause of hostByName failures. */
+void applyPublicDns() {
+  if (!wifiLinkUp()) {
+    return;
+  }
+  const IPAddress dns1(8, 8, 8, 8);
+  const IPAddress dns2(1, 1, 1, 1);
+  if (!WiFi.config(WiFi.localIP(), WiFi.gatewayIP(), WiFi.subnetMask(), dns1,
+                   dns2)) {
+    Serial.println("WiFi: failed to set public DNS");
+    return;
+  }
+  Serial.printf("WiFi: DNS %s, %s\n", dns1.toString().c_str(),
+                dns2.toString().c_str());
+}
+
+void onStaConnected() {
+  applyPublicDns();
+  Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
+                WiFi.localIP().toString().c_str());
+}
+
 void startStaConnect(const String& ssid, const String& pass) {
   prepareSta();
   if (ssid.length() > 0) {
@@ -308,6 +330,7 @@ bool tryConnectWithUi(const String& ssid, const String& pass, bool show_ui) {
     startStaConnect(ssid, pass);
 
     if (waitForLinkWithUi(ui_ssid, config::kWifiConnectAttemptMs)) {
+      onStaConnected();
       return true;
     }
   }
@@ -447,8 +470,7 @@ bool wifiSetupConnect() {
     Serial.println("Opening WiFi setup portal (after reset)");
     if (openConfigPortal() && wifiLinkUp()) {
       WiFi.setAutoReconnect(true);
-      Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
-                    WiFi.localIP().toString().c_str());
+      onStaConnected();
       return true;
     }
     Serial.println("WiFi connection failed");
@@ -460,15 +482,12 @@ bool wifiSetupConnect() {
 
   if (wifiLinkUp()) {
     WiFi.setAutoReconnect(true);
-    Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
-                  WiFi.localIP().toString().c_str());
+    onStaConnected();
     return true;
   }
 
   if (storedWifiCredentials() && connectSavedNetwork(true)) {
     WiFi.setAutoReconnect(true);
-    Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
-                  WiFi.localIP().toString().c_str());
     return true;
   }
 
@@ -480,8 +499,7 @@ bool wifiSetupConnect() {
 
   if (openConfigPortal() && wifiLinkUp()) {
     WiFi.setAutoReconnect(true);
-    Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
-                  WiFi.localIP().toString().c_str());
+    onStaConnected();
     return true;
   }
 
