@@ -1,0 +1,74 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Emulator › Run (debug)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/.pio/build/native/program",
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Emulator › Build",
+      "runInTerminal": true
+    },
+    {
+      "name": "Emulator › Test (debug)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/.pio/build/native_test/program",
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Emulator › Test: build"
+    },
+    {
+      "name": "Device › Run (debug)",
+      "type": "gdb",
+      "request": "attach",
+      "executable": "${workspaceFolder}/.pio/build/supermini_debug/firmware.elf",
+      "target": "localhost:3333",
+      "remote": true,
+      "cwd": "${workspaceFolder}",
+      "gdbpath": "${env:HOME}/.platformio/packages/toolchain-riscv32-esp/bin/riscv32-esp-elf-gdb",
+      "preLaunchTask": "Device › OpenOCD server",
+      "postDebugTask": "Device › Stop OpenOCD",
+      "valuesFormatting": "parseText"
+    },
+    {
+      "name": "Device › Test (debug)",
+      "type": "gdb",
+      "request": "attach",
+      "executable": "${workspaceFolder}/.pio/build/supermini_debug/firmware.elf",
+      "target": "localhost:3333",
+      "remote": true,
+      "cwd": "${workspaceFolder}",
+      "gdbpath": "${env:HOME}/.platformio/packages/toolchain-riscv32-esp/bin/riscv32-esp-elf-gdb",
+      "preLaunchTask": "Device › OpenOCD server",
+      "postDebugTask": "Device › Stop OpenOCD",
+      "stopAtEntry": "setup",
+      "valuesFormatting": "parseText"
+    },
+    {
+      "name": "Device › Attach (debugger)",
+      "type": "gdb",
+      "request": "attach",
+      "executable": "${workspaceFolder}/.pio/build/supermini_debug/firmware.elf",
+      "target": "localhost:3333",
+      "remote": true,
+      "cwd": "${workspaceFolder}",
+      "gdbpath": "${env:HOME}/.platformio/packages/toolchain-riscv32-esp/bin/riscv32-esp-elf-gdb",
+      "preLaunchTask": "Device › Attach: OpenOCD + logs",
+      "postDebugTask": "Device › Attach: stop OpenOCD + logs",
+      "valuesFormatting": "parseText"
+    },
+    {
+      "name": "Device › Flash release",
+      "type": "lldb",
+      "request": "launch",
+      "program": "/bin/echo",
+      "args": [
+        "Release firmware flashed."
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Device › Flash release",
+      "terminal": "console"
+    }
+  ]
+}

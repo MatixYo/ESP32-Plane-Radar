@@ -1,0 +1,2 @@
+# Local build tooling (installed by `make setup`)
+platformio>=6.1.0

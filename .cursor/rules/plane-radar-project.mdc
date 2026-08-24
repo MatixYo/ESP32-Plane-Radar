@@ -1,0 +1,39 @@
+---
+description: Plane Radar architecture, layers, and change constraints
+alwaysApply: true
+---
+
+# Plane Radar
+
+Firmware for **ESP32-C3 Super Mini** + **GC9A01** round display (240×240). Live ADS-B radar around a configured location.
+
+## Layer map
+
+| Layer | Path | Role |
+|-------|------|------|
+| Config | `include/config.h` | Pins, timings, defaults, portal names |
+| Hardware | `ui/`, `src/platform/` | LovyanGFX display, embedded VLW font |
+| Services | `include/platform/`, `src/platform/` | WiFi, location, ADS-B fetch |
+| UI | `include/ui/`, `src/ui/` | Radar grid, aircraft, runways, status screens |
+| Data | `include/core/`, `src/core/` | Generated airport/runway dataset |
+| Entry | `src/main.cpp` | Boot flow and main loop |
+
+## Namespaces
+
+- `config::` — compile-time constants
+- `services::adsb`, `services::location` — network and persisted location
+- `ui::radar`, `ui::runway` — display logic
+- `data::large_airports` — embedded runway data
+
+## Constraints
+
+- **PlatformIO env**: `supermini` only (Arduino + espressif32@6.5.0)
+- **No OTA slot** — single ~3 MB app partition (`partitions/plane_radar.csv`)
+- **Display stack**: LovyanGFX via `lgfx_config.hpp` — do not introduce TFT_eSPI or alternate drivers
+- **README is the user spec** — keep behavior and docs aligned when changing features
+
+## Change discipline
+
+- Minimize scope; match existing C++17 Arduino style and file layout
+- Put tunables in `config.h`, layout constants in `ui/radar_theme.h`, range presets in `ui/radar_range.h`
+- Do not hand-edit generated `src/core/large_airports_data.cpp`

@@ -1,56 +1,81 @@
 #pragma once
 
+/**
+ * Range / units accessors for the UI layer.
+ *
+ * The state and its persistence now live in core::settings; everything here is
+ * a forwarder so existing call sites read unchanged. fetchRadiusKm() stays in
+ * this layer because it is screen geometry — it depends on radar_theme.h, which
+ * core/ deliberately does not.
+ */
+
 #include <cstddef>
 #include <cstdint>
 
+#include "core/settings.h"
+#include "ui/radar_theme.h"
+
 namespace ui::radar {
 
+using RangePreset = core::settings::RangePreset;
+
+// `static` is load-bearing: a constexpr reference at namespace scope has
+// external linkage, so without it every translation unit emits a definition and
+// the link fails with "multiple definition of ui::radar::kRangePresets".
+// `static` (internal linkage) rather than `inline` because parts of the ESP32
+// Arduino build compile below C++17, where inline variables are only a
+// compiler extension — this way the alias is portable to any standard.
+static constexpr auto& kRangePresets = core::settings::kRangePresets;
+constexpr size_t kRangePresetCount = core::settings::kRangePresetCount;
+
+inline void rangeInit() { core::settings::init(); }
+inline void rangeNext() { core::settings::rangeNext(); }
+inline const RangePreset& rangeCurrent() { return core::settings::rangeCurrent(); }
+inline uint8_t rangeIndex() { return core::settings::rangeIndex(); }
+
+inline bool useKm() { return core::settings::useKm(); }
+inline bool showRunways() { return core::settings::showRunways(); }
+inline bool showTerrain() { return core::settings::showTerrain(); }
+
+inline void saveKmFromPortal(const char* v) {
+  core::settings::saveKmFromPortal(v);
+}
+inline void saveRunwaysFromPortal(const char* v) {
+  core::settings::saveRunwaysFromPortal(v);
+}
+inline void saveTerrainFromPortal(const char* v) {
+  core::settings::saveTerrainFromPortal(v);
+}
+inline void unitsReset() { core::settings::unitsReset(); }
+
+inline void formatRing3Label(char* buf, size_t len, float ring3_km,
+                             bool use_km) {
+  core::settings::formatRing3Label(buf, len, ring3_km, use_km);
+}
+inline void formatCurrentRing3Label(char* buf, size_t len) {
+  core::settings::formatCurrentRing3Label(buf, len);
+}
+
 /**
- * Range presets (label on ring 3 = ¾ of outer radius).
- *
- * Recommended for ADS-B on a 1.28″ display:
- *   5 km  — pattern / very local (airfield vicinity)
- *  10 km  — default; neighborhood spotting
- *  15 km  — wider local area
- *  25 km  — metro / regional picture
- *
- * Outer radius (for aircraft math) is ring-3 distance ÷ 0.75.
+ * ADS-B fetch radius (km), scaled out to the screen edge rather than the outer
+ * ring, so aircraft shown as rim dots beyond the ring still have data.
  */
-struct RangePreset {
-  /** Distance shown on ring 3 (¾ of outer radius), always stored in km. */
-  float ring3_km;
-  float outer_km;
-};
+inline float fetchRadiusKm() {
+  const float outer_km = rangeCurrent().outer_km;
+  const float screen_r_px =
+      static_cast<float>(kCenterX - kBeyondRingScreenMarginPx);
+  return outer_km * (screen_r_px / static_cast<float>(kGridOuterRadius));
+}
 
-constexpr float kRing3ToOuterKm = 4.0f / 3.0f;
-
-constexpr RangePreset kRangePresets[] = {
-    {5.0f, 5.0f * kRing3ToOuterKm},
-    {10.0f, 10.0f * kRing3ToOuterKm},
-    {15.0f, 15.0f * kRing3ToOuterKm},
-    {25.0f, 25.0f * kRing3ToOuterKm},
-};
-
-constexpr size_t kRangePresetCount =
-    sizeof(kRangePresets) / sizeof(kRangePresets[0]);
-
-/** Load saved range and distance units from flash. Call once after boot. */
-void rangeInit();
-/** Cycle preset and save to flash. */
-void rangeNext();
-const RangePreset& rangeCurrent();
-uint8_t rangeIndex();
-/** ADSB fetch radius (km): scaled to screen edge so beyond-ring dots have data. */
-float fetchRadiusKm();
-
-bool useMiles();
-bool showRunways();
-/** WiFi portal checkbox: "T" = miles, otherwise km. */
-void saveMilesFromPortal(const char* checkbox_value);
-void saveRunwaysFromPortal(const char* checkbox_value);
-void formatRing3Label(char* buf, size_t len, float ring3_km, bool use_miles);
-void formatCurrentRing3Label(char* buf, size_t len);
-/** Reset distance units to km (e.g. with WiFi credential wipe). */
-void unitsReset();
+/**
+ * Ground distance (km) from the screen centre to the screen edge — the
+ * half-span of the terrain elevation grid, which covers the whole square
+ * frame rather than just the outer ring.
+ */
+inline float terrainHalfSpanKm() {
+  const float outer_km = rangeCurrent().outer_km;
+  return outer_km *
+         (static_cast<float>(kCenterX) / static_cast<float>(kGridOuterRadius));
+}
 
 }  // namespace ui::radar

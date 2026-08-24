@@ -1,0 +1,36 @@
+---
+description: ESP32-C3 conventions — NVS, loop contract, config discipline
+globs: "{src,include}/**/*.{cpp,h,hpp}"
+alwaysApply: false
+---
+
+# ESP32 Conventions
+
+## NVS namespaces — keep separate
+
+| Namespace | Keys | File |
+|-----------|------|------|
+| `wifi` | `portal` (force setup screen) | `wifi_setup.cpp` |
+| `radar` | `lat`, `lon` | `radar_location.cpp` |
+| `planeradar` | `rangeIdx`, `useMiles`, `showRwys` | `radar_range.cpp` |
+
+Do not merge namespaces or hold overlapping `Preferences` handles — code comments warn of conflicts.
+
+## Main loop contract
+
+- Call `wifiLoop()` every `loop()` iteration
+- Long I/O must poll the network: ADS-B uses `services::adsb::setPollFn(wifiLoop)` during HTTP
+- BOOT button (GPIO 9, active LOW): poll `bootButtonPollLongPress()` and consume taps via `bootButtonConsumeTap()` during blocking work
+
+## Config and hardware
+
+- Pins, SPI, WiFi timing, ADS-B interval → `include/config.h`
+- Do not scatter magic GPIO numbers or timing constants in UI/service code
+
+## Credential reset
+
+Long BOOT hold (3 s) calls `wifiResetCredentialsAndReboot()` which clears WiFi, location (`services::location::clear()`), and units (`ui::radar::unitsReset()`). New persisted settings must join this wipe path.
+
+## WiFi TX power
+
+Both AP and STA modes use `WiFi.setTxPower(WIFI_POWER_8_5dBm)` in `wifi_setup.cpp`. Do not raise TX power without testing stability.

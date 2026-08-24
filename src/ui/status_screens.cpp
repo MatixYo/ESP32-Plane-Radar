@@ -8,10 +8,9 @@
 #include <cstring>
 
 #include "config.h"
-#include "hardware/display.h"
-#include "hardware/display_font.h"
-
-namespace fonts = lgfx::v1::fonts;
+#include "core/platform.h"
+#include "ui/display.h"
+#include "ui/display_font.h"
 
 namespace {
 
@@ -40,7 +39,6 @@ bool s_connecting_text_drawn = false;
 
 constexpr auto& kGfxTitle = fonts::FreeSans18pt7b;
 constexpr auto& kGfxBody = fonts::FreeSans12pt7b;
-constexpr auto& kGfxDetail = fonts::Font2;
 constexpr auto& kPortalGfxTitle = fonts::FreeSansBold18pt7b;
 constexpr auto& kPortalGfxBody = fonts::FreeSansBold12pt7b;
 constexpr auto& kPortalGfxEmphasis = fonts::FreeSansBold18pt7b;
@@ -209,13 +207,18 @@ void statusScreenConnectingTick() {
 }
 
 void statusScreenPortal() {
+  // Instructions come from the platform: the device tells you to join its AP,
+  // the native harness tells you where its local portal listens. The device
+  // implementation returns exactly the strings that used to be inline here, so
+  // the rendered screen is unchanged.
+  const core::platform::PortalHints hints = core::platform::portalHints();
   const TextLine lines[] = {
       {"Wi-Fi setup", 1.15f, &kPortalGfxTitle},
       {"1. Join network:", 1.05f, &kPortalGfxBody},
-      {config::kPortalApName, 1.12f, &kPortalGfxEmphasis},
+      {hints.join, 1.12f, &kPortalGfxEmphasis},
       {"2. Open in browser:", 1.05f, &kPortalGfxBody},
-      {config::kPortalHostUrl, 1.12f, &kPortalGfxEmphasis},
-      {"or 192.168.4.1", 1.0f, &kPortalGfxBody},
+      {hints.url, 1.12f, &kPortalGfxEmphasis},
+      {hints.alt, 1.0f, &kPortalGfxBody},
   };
   drawTextBlock(config::kColorYellow, config::kTextOnYellow, lines,
                 sizeof(lines) / sizeof(lines[0]));

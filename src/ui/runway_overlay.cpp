@@ -5,13 +5,11 @@
 #include <cmath>
 #include <cstdlib>
 
-#include "data/large_airports.h"
-#include "hardware/display_font.h"
-#include "services/radar_location.h"
+#include "core/large_airports.h"
+#include "ui/display_font.h"
+#include "core/settings.h"
 #include "ui/radar_range.h"
 #include "ui/radar_theme.h"
-
-namespace fonts = lgfx::v1::fonts;
 
 namespace ui::runway {
 namespace {
@@ -75,9 +73,9 @@ float e7ToDeg(int32_t e7) { return static_cast<float>(e7) * 1e-7f; }
 void offsetKmFromCenter(float lat, float lon, float* dx_km, float* dy_km,
                         float* dist_km) {
   *dx_km =
-      static_cast<float>(lon - services::location::lon()) * kKmPerDeg;
+      static_cast<float>(lon - core::settings::lon()) * kKmPerDeg;
   *dy_km =
-      static_cast<float>(lat - services::location::lat()) * kKmPerDeg;
+      static_cast<float>(lat - core::settings::lat()) * kKmPerDeg;
   *dist_km = sqrtf((*dx_km) * (*dx_km) + (*dy_km) * (*dy_km));
 }
 
@@ -181,12 +179,23 @@ bool drawRunwayLine(lgfx::LGFXBase& gfx, const data::large_airports::Runway& rw)
   const float he_lat = e7ToDeg(rw.he_lat_e7);
   const float he_lon = e7ToDeg(rw.he_lon_e7);
 
+  // Stretch about the midpoint so the strip is long enough to read while its
+  // centre and bearing stay correct. Done in degrees, before projection, so the
+  // exaggeration scales with the range preset like everything else.
+  const float mid_lat = (le_lat + he_lat) * 0.5f;
+  const float mid_lon = (le_lon + he_lon) * 0.5f;
+  constexpr float kScale = radar::kRunwayLengthScale;
+  const float a_lat = mid_lat + (le_lat - mid_lat) * kScale;
+  const float a_lon = mid_lon + (le_lon - mid_lon) * kScale;
+  const float b_lat = mid_lat + (he_lat - mid_lat) * kScale;
+  const float b_lon = mid_lon + (he_lon - mid_lon) * kScale;
+
   int x0 = 0;
   int y0 = 0;
   int x1 = 0;
   int y1 = 0;
-  latLonToScreen(le_lat, le_lon, &x0, &y0);
-  latLonToScreen(he_lat, he_lon, &x1, &y1);
+  latLonToScreen(a_lat, a_lon, &x0, &y0);
+  latLonToScreen(b_lat, b_lon, &x1, &y1);
 
   if (!segmentIntersectsDisc(x0, y0, x1, y1)) {
     return false;
