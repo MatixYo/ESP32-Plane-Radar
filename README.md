@@ -248,11 +248,14 @@ Everything runs from **Run and Debug (F5)** — pick a configuration from the dr
 | **Emulator › Test (debug)** | One unit test suite; prompts for `test_geo` / `test_settings` |
 | **Device › Run (debug)** | Flash debug firmware, attach to the board, let it run |
 | **Device › Test (debug)** | Flash debug firmware, attach, halt at `setup()` |
+| **Device › Attach (debugger)** | Attach to the firmware already on the board and open the serial log |
 | **Device › Flash release** | Release build, flash to the board (no debugging) |
 
 Both test suites link to the same `.pio/build/native_test/program`, so the suite is picked at launch instead of debugging whichever happened to build last.
 
 The device configurations set clickable IDE breakpoints in the editor, same as the emulator ones. Each starts OpenOCD as a pre-launch step and shuts it down afterwards, so the JTAG interface is not left held.
+
+**Device › Attach (debugger)** skips the rebuild and the flash write, so a session starts in a couple of seconds instead of half a minute — use it while iterating on breakpoints against firmware already on the board. It expects the flash to match `.pio/build/supermini_debug/firmware.elf`; against a stale ELF, breakpoints land on the wrong lines. It also opens the serial monitor next to the GDB session, and does so while the board sits halted at the reset vector, so `pf::logf` output is captured from the first boot line onwards — the ESP32-C3's USB Serial/JTAG carries the CDC console and the JTAG interface at the same time, over the one cable. Ending the session closes that monitor again, because a monitor left attached holds the port that the next esptool upload needs.
 
 Extensions ([CodeLLDB](https://open-vsx.org/extension/vadimcn/vscode-lldb) for the emulator, [Native Debug](https://open-vsx.org/extension/webfreak/debug) for the board) are listed in `.vscode/extensions.json` and offered on first open.
 
@@ -281,6 +284,8 @@ make test-live          # opt-in live terrain tile fetch (needs internet)
 - USB CDC on boot enabled in `platformio.ini` for the Super Mini
 
 Flashing uses `upload_flags = --no-stub`. Over the ESP32-C3's built-in USB Serial/JTAG, esptool's flasher stub stops responding right after `Stub running...` and the upload dies with `Unable to verify flash chip connection`. The ROM loader takes about 40 s instead of 15 s, but it does not fail. `upload_speed` is pinned to 115200 for the same reason — the baud renegotiation is another failure point, and the nominal rate is meaningless over USB CDC anyway.
+
+`device reports readiness to read but returned no data (device disconnected or multiple access on port?)` during an upload means something else already holds `/dev/cu.usbmodem*` — almost always a serial monitor left running. esptool needs the port exclusively. Close that terminal or run the **Device › Stop serial monitor** task (`scripts/device-monitor-stop.sh`) and flash again.
 
 `Failed to read MISA from hart 0` means the RISC-V debug module is wedged. It looks exactly like dead hardware, but the board is fine — and no reset clears it, because every reset available over USB leaves the chip powered. Only unplugging it does. Two things put it in that state, and both are avoided by the debug scripts:
 

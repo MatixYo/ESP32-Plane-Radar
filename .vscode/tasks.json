@@ -125,6 +125,49 @@
       }
     },
     {
+      "label": "Device › OpenOCD server (no flash)",
+      "type": "shell",
+      "command": "./scripts/device-openocd.sh --no-flash",
+      "detail": "Serve GDB on :3333 against the firmware already on the board (no rebuild, no reflash)",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "openocd",
+        "pattern": {
+          "regexp": "^(OPENOCD_OUTPUT_IS_NOT_A_DIAGNOSTIC)$",
+          "file": 1,
+          "location": 1,
+          "message": 1
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^==> |^Processing |^Open On-Chip Debugger",
+          "endsPattern": "Listening on port 3333 for gdb connections"
+        }
+      },
+      "runOptions": {
+        "instanceLimit": 1
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": false,
+        "close": false
+      }
+    },
+    {
+      "label": "Device › Attach: OpenOCD + logs",
+      "dependsOn": [
+        "Device › OpenOCD server (no flash)",
+        "Device › Serial monitor"
+      ],
+      "dependsOrder": "sequence",
+      "detail": "preLaunchTask for Device › Attach: GDB server first, then the serial log",
+      "problemMatcher": []
+    },
+    {
       "label": "Device › Stop OpenOCD",
       "type": "shell",
       "command": "./scripts/device-stop.sh",
@@ -138,6 +181,30 @@
         "panel": "shared",
         "close": true
       }
+    },
+    {
+      "label": "Device › Stop serial monitor",
+      "type": "shell",
+      "command": "./scripts/device-monitor-stop.sh",
+      "detail": "Release the USB CDC port so the next esptool upload can claim it",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared",
+        "close": true
+      }
+    },
+    {
+      "label": "Device › Attach: stop OpenOCD + logs",
+      "dependsOn": [
+        "Device › Stop OpenOCD",
+        "Device › Stop serial monitor"
+      ],
+      "detail": "postDebugTask for Device › Attach: resume the board and free the serial port",
+      "problemMatcher": []
     },
     {
       "label": "Device › Test (debug, terminal GDB)",

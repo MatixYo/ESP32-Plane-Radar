@@ -46,6 +46,19 @@
       "valuesFormatting": "parseText"
     },
     {
+      "name": "Device › Attach (debugger)",
+      "type": "gdb",
+      "request": "attach",
+      "executable": "${workspaceFolder}/.pio/build/supermini_debug/firmware.elf",
+      "target": "localhost:3333",
+      "remote": true,
+      "cwd": "${workspaceFolder}",
+      "gdbpath": "${env:HOME}/.platformio/packages/toolchain-riscv32-esp/bin/riscv32-esp-elf-gdb",
+      "preLaunchTask": "Device › Attach: OpenOCD + logs",
+      "postDebugTask": "Device › Attach: stop OpenOCD + logs",
+      "valuesFormatting": "parseText"
+    },
+    {
       "name": "Device › Flash release",
       "type": "lldb",
       "request": "launch",
