@@ -6,6 +6,8 @@
 
 Firmware for an **ESP32-C3 Super Mini** and a **1.28″ round GC9A01** display (240×240). Shows a circular **ADS-B radar** around your configured location, with **WiFiManager** for first-time setup.
 
+> **Personal fork** of [MatixYo/ESP32-Plane-Radar](https://github.com/MatixYo/ESP32-Plane-Radar) (MIT). Adds: callsign → route (origin → destination) and operating airline via [adsbdb](https://www.adsbdb.com/), a fading breadcrumb trail per aircraft, climb/descent indicator, Italian city exonyms, expanded regional airport/runway data, tag-collision cycling, and the adsb.fi HTTP/1.0 chunked-encoding fix ([#82](https://github.com/MatixYo/ESP32-Plane-Radar/issues/82)). Upstream copyright and licence are unchanged; see [LICENSE](LICENSE).
+
 ## What it does
 
 1. **Wi‑Fi setup** (if needed) — captive portal on AP **`PlaneRadar-Setup`**
@@ -70,17 +72,44 @@ Preset and miles/km choice persist across reboot (`planeradar` NVS namespace).
 
 ### Runways
 
-- Major airports from OurAirports (`large_airport`); all open runway strips in range (helipads excluded)
-- Teal runway lines with one ICAO label per airport (e.g. `KJFK`); toggle in the Wi‑Fi setup portal
-- Update the embedded list: `python3 scripts/build_large_airports.py`
+- Every `large_airport` worldwide, plus `medium_airport` / `small_airport` in `LOCAL_COUNTRIES` (default Italy) for regional detail — e.g. Verona-Boscomantico, Carpi, Legnago near Mantova
+- Only airports with a 4-letter ICAO ident **and** runway end-point coordinates are drawable; most minor Italian grass strips (`IT-xxxx` idents) have no runway geometry in OurAirports and cannot be shown
+- All open runway strips in range (helipads excluded); teal lines with one ICAO label per airport (e.g. `KJFK`); toggle in the Wi‑Fi setup portal
+- Update / widen the embedded list: edit `LOCAL_COUNTRIES` in `scripts/build_large_airports.py`, then `python3 scripts/build_large_airports.py`
 
 ### Aircraft
 
-- **Inside the outer ring** — red heading triangle, magenta speed vector (clipped at the ring), callsign / type / altitude tags
+- **Inside the outer ring** — red heading triangle, yellow breadcrumb trail of the last `kTrackHistoryDepth` fixes (~3 min; fading toward the oldest, cut off at the ring), callsign / type / altitude tags. The type line also carries the operating airline (`A320 Ryanair`) when the callsign resolves to a scheduled flight — same source as the route line, no extra request
+- **Climb / descent** — small triangle on the altitude tag line, just before the altitude value: green pointing up for a climb, amber pointing down for a descent; hidden below ±`kVertRateThresholdFpm` (200 ft/min) so level cruise stays clean. Source: `baro_rate`, else `geom_rate` from adsb.fi
 - **Outside the ring** (still within ADS-B fetch) — small **red dot on the screen rim** at the correct bearing (direction cue; not distance-accurate past the ring)
 - **Tags** — placed toward the **center**: west (left) → tag on the **right** of the symbol; east (right) → tag on the **left**
+- **Overlapping tags take turns** — when two or more tag blocks would collide they form a cluster and only one is shown at a time, swapping every `kAircraftTagCycleMs` (2 s). Symbols stay visible for all; once the tags no longer overlap every label is shown again. Between ADS-B fetches `radarDisplayAnimTick()` repaints just for the swap.
 
 As range decreases (or aircraft approach), targets move inward; beyond-ring dots become full symbols when they cross the outer ring.
+
+### Route (origin → destination)
+
+A fourth tag line shows `Origin>Destination` (muted green) when the callsign
+resolves to a scheduled flight:
+
+- Source: [adsbdb](https://www.adsbdb.com/) — one HTTPS `GET /v0/callsign/<cs>` per
+  callsign (ADS-B itself carries no route). Runs from the main loop *after* the
+  ADS-B fetch so only one `WiFiClientSecure` is alive at once (two exhaust the
+  C3 heap → `SSL - Memory allocation failed`). The same response also yields the
+  operating airline name shown on the type line.
+- Results are cached in RAM: a route or a firm "no route" (adsbdb answers an
+  unknown callsign with **HTTP 404** + a valid body) holds for
+  `kRouteNegativeTtlMs`; a soft failure (timeout, TLS OOM) retries after the
+  shorter `kRouteRetryTtlMs`. Only `kRouteLookupsPerCycle` **new** callsigns are
+  queried per ADS-B poll, so the fetch cycle stays short.
+- Endpoint label preference: **Italian exonym** (`Londra`), else the city's own
+  name ASCII-folded (`Malaga`, `Katowice`, `Bastia`), else the **IATA** code
+  (`AGP`) when adsbdb returns no city.
+- The exonym table is `src/data/city_exonyms_data.cpp` (hand-curated). Reseed
+  candidates with `python3 scripts/build_city_exonyms.py` (Wikidata + OurAirports)
+  and prune before committing.
+- General aviation, military and non-scheduled callsigns simply have no route.
+- Turn the whole feature off with `kRouteLookupEnabled = false` in `config.h`.
 
 ### ADS-B
 
@@ -101,6 +130,8 @@ Edit **`include/config.h`** for hardware and behavior:
 | Display SPI | pins, `kDisplayInvert`, `kDisplayRgbOrder`, `kDisplaySpiWriteHz` |
 | Default location | `kDefaultRadarLat`, `kDefaultRadarLon` (until portal overrides) |
 | ADS-B | `kAdsbFetchIntervalMs`, `kAdsbShowGroundAircraft` |
+| Route lookup | `kRouteLookupEnabled`, `kRouteApiBase`, `kRouteLookupsPerCycle`, `kRouteCacheSize`, `kRouteNegativeTtlMs`, `kRouteRetryTtlMs` |
+| Track trail | `kTrackHistoryDepth`, `kTrackHistoryMax`, `kTrackHistoryTtlMs`, `kTrackHistoryMinStepDeg2` |
 
 Range presets: `include/ui/radar_range.h` (`kRangePresets`).
 
@@ -115,6 +146,7 @@ include/
     display_font.h
   data/
     large_airports.h
+    city_exonyms.h
   ui/
     radar_theme.h
     radar_range.h
@@ -125,17 +157,23 @@ include/
     wifi_setup.h
     radar_location.h
     adsb_client.h
+    flight_route.h
+    track_history.h
 data/
   ui_font.vlw              — embedded smooth UI font (Noto Sans Bold)
 scripts/
   build_large_airports.py
+  build_city_exonyms.py
 src/
   main.cpp
   data/
     large_airports_data.cpp
+    city_exonyms_data.cpp
   hardware/
   ui/
   services/
+    flight_route.cpp        — callsign → origin/destination (adsbdb, cached)
+    track_history.cpp       — per-aircraft breadcrumb ring (keyed by ICAO hex)
 ```
 
 ## Wiring (GC9A01 ↔ ESP32-C3 Super Mini)
@@ -201,6 +239,54 @@ git push origin v1.0.0
 ```
 
 The release workflow builds firmware in CI and attaches the merged image to the release. Download from **Releases** on GitHub, then flash at **0x0** (ESP32-C3, 4 MB).
+
+## Troubleshooting
+
+### Radar connects but never shows aircraft — serial prints `adsb: JSON parse error: InvalidInput`
+
+(See [#82](https://github.com/MatixYo/ESP32-Plane-Radar/issues/82).)
+
+
+`opendata.adsb.fi` is served through Cloudflare, which answers the API endpoint with
+`Transfer-Encoding: chunked` and no `Content-Length` on **HTTP/1.1**.
+`readResponseBodyWithPoll()` in `src/services/adsb_client.cpp` reads the raw socket via
+`http.getStreamPtr()`, which does **not** strip the chunked framing, so the payload starts
+with a hex chunk-size line and `deserializeJson()` bails out with `InvalidInput`. HTTP 200
+is received and the body is non-empty, so there is no other error in the log.
+
+Fix — force HTTP/1.0 (no chunked framing; body delimited by connection close, already
+handled by the read loop) in `fetchUpdate()`, right after `http.begin(...)`:
+
+```cpp
+http.useHTTP10(true);
+```
+
+Alternative: replace the manual `getStreamPtr()` loop with `payload = http.getString();`,
+which de-chunks correctly regardless of HTTP version (drops the cooperative `pollNetwork()`
+during the read).
+
+### Build fails: `'namespace fonts = lgfx::v1::lgfx::v1::fonts;' conflicts with a previous declaration`
+
+LovyanGFX **≥ 1.2.24** changed the trailing declaration in `lgfx/v1/lgfx_fonts.hpp` from a
+namespace **alias** to a real `namespace fonts { using namespace lgfx::v1::fonts; }`, which
+collides with the identically-named aliases in `radar_display.cpp`, `status_screens.cpp`
+and `runway_overlay.cpp`. `lib_deps` uses `lovyan03/LovyanGFX@^1.2.7`, which now resolves
+to a broken version.
+
+Fix — pin the last release that still uses an alias, in `platformio.ini`:
+
+```ini
+lovyan03/LovyanGFX@1.2.21
+```
+
+(or remove the three `namespace fonts = lgfx::v1::fonts;` aliases and let the font names
+resolve through LovyanGFX's own `fonts` namespace).
+
+### ESP32-C3-Zero (or other bare C3 boards)
+
+Runs unchanged with the wiring above. The boot-time warning
+`spiAttachMISO(): SPI Does not have default pins on ESP32C3!` is harmless — MISO is unused
+(`pin_miso = -1`), the panel is write-only.
 
 ## Dependencies
 

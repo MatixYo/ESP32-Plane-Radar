@@ -35,16 +35,16 @@ constexpr int kCenterDotRadius = 2;
 constexpr int kAircraftNoseLenPx = 8;
 constexpr int kAircraftTailLenPx = 3;
 constexpr int kAircraftTailHalfPx = 4;
-/** Track vector: ground distance covered in this many seconds at current gs. */
-constexpr float kAircraftTrackHorizonSec = 60.0f;
-/** Minimum visible vector when gs > 0 (px). */
-constexpr int kAircraftSpeedLineMinPx = 2;
-/** Track line length uses this outer_km, not the active range preset. */
-constexpr float kAircraftTrackRefOuterKm = 13.3f;
-/** Shorter than full 60 s horizon at ref scale; ×1.5 length boost applied. */
-constexpr float kAircraftTrackLengthScale = 1.5f / 5.0f;
-/** drawWideLine half-width for speed vectors (~2 px total). */
+/** drawWideLine half-width for the breadcrumb trail segments (~2 px total). */
 constexpr float kAircraftTrackLineHalfWidth = 1.0f;
+
+/** Climb/descent triangle on the altitude tag line: hidden when |vertical rate|
+ *  is below this (ft/min) so level cruise stays uncluttered. */
+constexpr float kVertRateThresholdFpm = 200.0f;
+/** Filled triangle glyph: half-width, full height, gap before the altitude (px). */
+constexpr int kVertRateGlyphHalfWpx = 4;
+constexpr int kVertRateGlyphHpx = 8;
+constexpr int kVertRateGlyphGapPx = 3;
 
 constexpr float kRunwayLineWidthPx = 2.0f;
 constexpr float kRunwayLineHalfWidth = kRunwayLineWidthPx * 0.5f;
@@ -61,6 +61,10 @@ constexpr int kBeyondRingDotRadiusPx = 4;
 constexpr int kBeyondRingScreenMarginPx = 2;
 /** Target cap height (px) for aircraft tags (bold, slightly above scale label). */
 constexpr int kAircraftTagLabelHeightPx = 13;
+/** Overlapping tags take turns: each cluster member is shown for this long. */
+constexpr uint32_t kAircraftTagCycleMs = 2000;
+/** AABB slack when testing whether two tag blocks overlap (px). */
+constexpr int kAircraftTagOverlapPadPx = 2;
 
 /** RGB565 palette targets (applied in initPalette). */
 constexpr uint8_t kBgR = 4;
@@ -72,15 +76,27 @@ constexpr uint8_t kGridB = 32;
 constexpr uint8_t kAircraftR = 255;
 constexpr uint8_t kAircraftG = 0;
 constexpr uint8_t kAircraftB = 0;
+/** Breadcrumb trail — yellow, faded per segment toward the oldest fix. */
 constexpr uint8_t kTrackR = 255;
-constexpr uint8_t kTrackG = 0;
-constexpr uint8_t kTrackB = 255;
+constexpr uint8_t kTrackG = 225;
+constexpr uint8_t kTrackB = 0;
 constexpr uint8_t kTagTypeR = 255;
 constexpr uint8_t kTagTypeG = 200;
 constexpr uint8_t kTagTypeB = 0;
 constexpr uint8_t kTagAltR = 90;
 constexpr uint8_t kTagAltG = 200;
 constexpr uint8_t kTagAltB = 255;
+/** Route line (origin > destination) — muted green, below the altitude. */
+constexpr uint8_t kTagRouteR = 150;
+constexpr uint8_t kTagRouteG = 230;
+constexpr uint8_t kTagRouteB = 150;
+/** Vertical-rate triangle: green for a climb, amber for a descent. */
+constexpr uint8_t kVertClimbR = 60;
+constexpr uint8_t kVertClimbG = 220;
+constexpr uint8_t kVertClimbB = 90;
+constexpr uint8_t kVertDescentR = 255;
+constexpr uint8_t kVertDescentG = 160;
+constexpr uint8_t kVertDescentB = 0;
 constexpr uint8_t kRunwayR = 56;
 constexpr uint8_t kRunwayG = 150;
 constexpr uint8_t kRunwayB = 170;
@@ -95,8 +111,11 @@ extern uint16_t kColorLabel;
 extern uint16_t kColorCenter;
 extern uint16_t kColorAircraft;
 extern uint16_t kColorTrackVector;
+extern uint16_t kColorVertClimb;
+extern uint16_t kColorVertDescent;
 extern uint16_t kColorTagType;
 extern uint16_t kColorTagAltitude;
+extern uint16_t kColorTagRoute;
 extern uint16_t kColorRunway;
 extern uint16_t kColorRunwayLabel;
 
