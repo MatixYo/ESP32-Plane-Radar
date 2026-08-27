@@ -56,6 +56,8 @@ void fetchAndDrawAircraft() {
     handleBootButton();
     return;
   }
+  // Separate HTTPS call, run only after fetchUpdate()'s TLS session is gone.
+  services::adsb::resolveRoutes();
   ui::radarDisplayRefreshAircraft();
   handleBootButton();
 }
@@ -112,6 +114,9 @@ void loop() {
     } else if (millis() - g_last_adsb_fetch_ms >= config::kAdsbFetchIntervalMs) {
       g_last_adsb_fetch_ms = millis();
       fetchAndDrawAircraft();
+    } else {
+      // Between fetches: let stacked aircraft tags take turns.
+      ui::radarDisplayAnimTick();
     }
   }
 

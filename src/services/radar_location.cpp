@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "config.h"
+#include "services/track_history.h"
 
 namespace services::location {
 
@@ -42,6 +43,8 @@ void persist(double lat, double lon) {
   prefs.end();
   s_lat = lat;
   s_lon = lon;
+  // Stored trail fixes are offsets from the old home — drop them.
+  services::track::clear();
 }
 
 }  // namespace

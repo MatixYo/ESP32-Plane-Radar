@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""Build runway dataset from OurAirports (large_airport only)."""
+"""Build the runway-overlay dataset from OurAirports.
+
+Included:
+  * every ``large_airport`` worldwide
+  * ``medium_airport`` / ``small_airport`` in LOCAL_COUNTRIES (regional detail —
+    e.g. Verona-Boscomantico, Carpi, Legnago near Mantova)
+
+Only airports with a 4-letter ICAO ident *and* at least one runway that carries
+end-point coordinates survive — most minor Italian airfields (grass strips with
+``IT-xxxx`` idents) have no runway geometry in OurAirports and cannot be drawn.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +21,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 OUT_H = ROOT / "include" / "data" / "large_airports.h"
 OUT_CPP = ROOT / "src" / "data" / "large_airports_data.cpp"
+
+# Minor airports (medium/small) are added only for these ISO country codes, to
+# keep the embedded table small. Add more codes here and re-run to widen it.
+LOCAL_COUNTRIES = {"IT"}
+LOCAL_TYPES = {"medium_airport", "small_airport"}
 
 AIRPORTS_URL = (
     "https://raw.githubusercontent.com/davidmegginson/ourairports-data/main/"
@@ -65,9 +80,14 @@ def build_dataset() -> tuple[
     airports = fetch_csv(AIRPORTS_URL)
     runways = fetch_csv(RUNWAYS_URL)
 
-    large_idents: dict[str, tuple[int, int]] = {}
+    candidates: dict[str, tuple[int, int]] = {}
     for a in airports:
-        if a.get("type") != "large_airport":
+        atype = a.get("type")
+        if atype == "large_airport":
+            pass
+        elif atype in LOCAL_TYPES and a.get("iso_country") in LOCAL_COUNTRIES:
+            pass
+        else:
             continue
         ident = (a.get("ident") or "").strip()
         if len(ident) != 4:
@@ -76,19 +96,19 @@ def build_dataset() -> tuple[
         lon = coord_e7(a.get("longitude_deg"))
         if lat is None or lon is None:
             continue
-        large_idents[ident] = (lat, lon)
+        candidates[ident] = (lat, lon)
 
-    airport_rows = sorted(
-        (ident, lat, lon) for ident, (lat, lon) in large_idents.items()
+    cand_rows = sorted(
+        (ident, lat, lon) for ident, (lat, lon) in candidates.items()
     )
-    airport_index = {ident: idx for idx, (ident, _, _) in enumerate(airport_rows)}
+    cand_index = {ident: idx for idx, (ident, _, _) in enumerate(cand_rows)}
 
-    segments: list[tuple[int, int, int, int, int, int]] = []
+    by_airport: dict[int, list[tuple[int, int, int, int, int]]] = {}
     for r in runways:
         if r.get("closed") == "1":
             continue
         airport = (r.get("airport_ident") or "").strip()
-        if airport not in airport_index:
+        if airport not in cand_index:
             continue
         if is_helipad(r):
             continue
@@ -105,16 +125,24 @@ def build_dataset() -> tuple[
         if None in (le_lat, le_lon, he_lat, he_lon):
             continue
         length_m = int(round(length_ft * 0.3048))
-        segments.append(
-            (
-                airport_index[airport],
-                le_lat,
-                le_lon,
-                he_lat,
-                he_lon,
-                length_m,
-            )
+        by_airport.setdefault(cand_index[airport], []).append(
+            (le_lat, le_lon, he_lat, he_lon, length_m)
         )
+
+    # Keep only airports that ended up with drawable runway geometry, and
+    # re-index them densely.
+    airport_rows = [row for i, row in enumerate(cand_rows) if i in by_airport]
+    remap = {
+        old: new
+        for new, old in enumerate(i for i in range(len(cand_rows)) if i in by_airport)
+    }
+
+    segments: list[tuple[int, int, int, int, int, int]] = []
+    for old_idx, runs in by_airport.items():
+        for le_lat, le_lon, he_lat, he_lon, length_m in runs:
+            segments.append(
+                (remap[old_idx], le_lat, le_lon, he_lat, he_lon, length_m)
+            )
 
     segments.sort(key=lambda row: (row[0], -row[5]))
     return airport_rows, segments

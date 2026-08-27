@@ -8,6 +8,8 @@
 #include <cstring>
 
 #include "config.h"
+#include "services/flight_route.h"
+#include "services/track_history.h"
 
 namespace services::adsb {
 
@@ -143,6 +145,17 @@ float pickGroundSpeed(const JsonObject& plane) {
   return 0.0f;
 }
 
+float pickVerticalRate(const JsonObject& plane) {
+  float v = 0.0f;
+  if (readJsonFloat(plane, "baro_rate", &v)) {
+    return v;
+  }
+  if (readJsonFloat(plane, "geom_rate", &v)) {
+    return v;
+  }
+  return 0.0f;
+}
+
 bool isOnGround(const JsonObject& plane) {
   if (!plane["alt_baro"].is<const char*>()) {
     return false;
@@ -188,6 +201,7 @@ void formatAltitudeTag(const JsonObject& plane, char* out, size_t out_len) {
 }
 
 void fillTagFields(Aircraft* ac, const JsonObject& plane) {
+  copyJsonStringTrimmed(plane, "hex", ac->hex, sizeof(ac->hex));
   copyJsonStringTrimmed(plane, "flight", ac->callsign, sizeof(ac->callsign));
   if (ac->callsign[0] == '\0') {
     copyJsonStringTrimmed(plane, "hex", ac->callsign, sizeof(ac->callsign));
@@ -195,6 +209,9 @@ void fillTagFields(Aircraft* ac, const JsonObject& plane) {
 
   copyJsonStringTrimmed(plane, "t", ac->type, sizeof(ac->type));
   formatAltitudeTag(plane, ac->alt, sizeof(ac->alt));
+  ac->airline[0] = '\0';
+  ac->origin[0] = '\0';
+  ac->dest[0] = '\0';
 }
 
 }  // namespace
@@ -204,6 +221,25 @@ void setPollFn(PollFn fn) { s_poll_fn = fn; }
 size_t aircraftCount() { return s_aircraft_count; }
 
 const Aircraft* aircraftList() { return s_aircraft; }
+
+// Cached answers are free; unresolved callsigns cost one HTTPS GET each and are
+// capped per cycle so the ADS-B poll interval is not blown. Runs from the main
+// loop *after* fetchUpdate() so only one WiFiClientSecure is alive at a time.
+void resolveRoutes() {
+  if (!config::kRouteLookupEnabled) {
+    return;
+  }
+  uint8_t budget = config::kRouteLookupsPerCycle;
+  for (size_t i = 0; i < s_aircraft_count; ++i) {
+    Aircraft& ac = s_aircraft[i];
+    const route::Result r = route::resolve(
+        ac.callsign, ac.origin, sizeof(ac.origin), ac.dest, sizeof(ac.dest),
+        ac.airline, sizeof(ac.airline), s_poll_fn, budget > 0);
+    if (r == route::Result::kFetched && budget > 0) {
+      --budget;
+    }
+  }
+}
 
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   const float dist_nm = kmToNauticalMiles(fetch_radius_km);
@@ -223,6 +259,14 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     Serial.println("adsb: http.begin failed");
     return false;
   }
+
+  // adsb.fi sits behind Cloudflare, which replies with Transfer-Encoding:
+  // chunked and no Content-Length on HTTP/1.1. readResponseBodyWithPoll() reads
+  // the raw socket via getStreamPtr() and does not de-chunk, so the chunk-size
+  // hex lines end up in the payload and deserializeJson() fails with
+  // InvalidInput. Forcing HTTP/1.0 makes the server send the body unframed,
+  // delimited by connection close (already handled by the read loop).
+  http.useHTTP10(true);
 
   http.setTimeout(kRequestTimeoutMs);
   const int code = performGetWithPoll(http);
@@ -270,11 +314,18 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     s_aircraft[n].nose_deg = pickNoseHeading(plane);
     s_aircraft[n].track_deg = pickTrackHeading(plane);
     s_aircraft[n].gs_knots = pickGroundSpeed(plane);
+    s_aircraft[n].vert_rate_fpm = pickVerticalRate(plane);
     fillTagFields(&s_aircraft[n], plane);
     ++n;
   }
 
   s_aircraft_count = n;
+
+  for (size_t i = 0; i < n; ++i) {
+    track::record(s_aircraft[i].hex, s_aircraft[i].lat, s_aircraft[i].lon);
+  }
+  track::expireStale();
+
   Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
   return true;
 }
