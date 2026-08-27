@@ -293,3 +293,41 @@ Runs unchanged with the wiring above. The boot-time warning
 - [LovyanGFX](https://github.com/lovyan03/LovyanGFX)
 - [WiFiManager](https://github.com/tzapu/WiFiManager)
 - [ArduinoJson](https://github.com/bblanchon/ArduinoJson)
+
+## Fork & upstream
+
+This repository is a personal fork of
+[MatixYo/ESP32-Plane-Radar](https://github.com/MatixYo/ESP32-Plane-Radar) (MIT).
+The upstream `LICENSE` and its `Copyright (c) 2026 MatixYo` are kept unchanged;
+fork-specific changes are listed in the note at the top of this file.
+
+### How it was set up
+
+1. Forked `MatixYo/ESP32-Plane-Radar` to `Niko12345678/ESP32-Plane-Radar` on GitHub.
+2. All local changes were committed on a branch `nicola/enhanced-radar`
+   (base: last upstream commit `69c1078`), then pushed to the fork.
+3. Merged into the fork's `main` via pull request **#1**
+   (`nicola/enhanced-radar` → `main`, merge commit `75624f6`), so the fork's
+   `main` now *is* this version.
+4. Local `main` tracks `origin/main` (the fork). The `upstream` remote was
+   removed — day-to-day work happens only on this fork.
+
+Current remote:
+
+```
+origin  https://github.com/Niko12345678/ESP32-Plane-Radar.git   (fetch + push)
+```
+
+### Pulling later changes from the original project
+
+`upstream` is not configured. Add it back only when you want to merge new work
+from MatixYo:
+
+```bash
+git remote add upstream https://github.com/MatixYo/ESP32-Plane-Radar.git
+git fetch upstream
+git checkout main
+git merge upstream/main        # merge, not rebase — main already has a merge commit
+git push origin main
+git remote remove upstream     # optional: drop it again afterwards
+```
