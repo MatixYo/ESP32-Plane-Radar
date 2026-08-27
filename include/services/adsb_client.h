@@ -20,8 +20,9 @@ struct Aircraft {
   /** Operating airline name (ASCII-folded) shown next to the type; "" when the
    *  callsign is not a scheduled flight. Filled by services::route. */
   char airline[24];
-  /** Route endpoints for the tag: Italian city name when known, else IATA
-   *  code, else "". Filled by services::route from the callsign. */
+  /** Route endpoints for the tag: Italian city name when known, else the
+   *  city's own name, else the IATA code, else the ICAO code, else "".
+   *  Filled by services::route from the callsign. */
   char origin[20];
   char dest[20];
 };
@@ -39,12 +40,13 @@ void setPollFn(PollFn fn);
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km);
 
 /**
- * Fill origin/dest on the current aircraft list from their callsigns.
+ * Fill origin/dest/airline on the current aircraft list from their callsigns.
  * Call *after* fetchUpdate() has returned, so its TLS session is already
  * torn down (the route lookup opens its own HTTPS connection and two live
  * WiFiClientSecure contexts exhaust the C3 heap).
- * Cached routes are free; unresolved callsigns cost one HTTPS GET each,
- * capped at config::kRouteLookupsPerCycle per call.
+ * Cached routes are free; unresolved callsigns cost up to two HTTPS GETs each
+ * (hexdb route + adsbdb airline), capped at config::kRouteLookupsPerCycle
+ * callsigns per call.
  */
 void resolveRoutes();
 

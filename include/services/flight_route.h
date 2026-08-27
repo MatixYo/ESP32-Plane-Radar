@@ -18,16 +18,24 @@ enum class Result {
  * Resolve the origin / destination endpoints and operating airline for
  * `callsign`.
  *
- * On success `origin` and `dest` are filled with the Italian city name when
- * known, otherwise the IATA code, otherwise "" (unknown); `airline` gets the
- * operator name (ASCII-folded) or "". A cached "no route" answer fills all
- * three with "" and reports kFromCache.
+ * The route comes from hexdb.io (callsign -> two ICAO codes), each resolved to
+ * a city name locally via data::airports; the airline name comes from a second
+ * GET to adsbdb. On success `origin` and `dest` are filled with the Italian
+ * city name when known, otherwise the city's own name, otherwise the IATA
+ * code, otherwise the ICAO code; `airline` gets the operator name
+ * (ASCII-folded) or "".
  *
- * At most one HTTPS GET is issued, and only when `allow_network` is true.
+ * `ac_lat` / `ac_lon` are the aircraft's current position: when both route
+ * airports are in data::airports and the aircraft is more than
+ * config::kRouteCorridorMaxKm outside the great-circle corridor between them,
+ * the route is treated as a stale callsign match and `origin` / `dest` come
+ * back "" (the airline still resolves). Pass 0/0 or NaN to skip that check.
+ *
+ * Up to two HTTPS GETs are issued, and only when `allow_network` is true.
  */
 Result resolve(const char* callsign, char* origin, size_t origin_len,
                char* dest, size_t dest_len, char* airline, size_t airline_len,
-               PollFn poll, bool allow_network);
+               float ac_lat, float ac_lon, PollFn poll, bool allow_network);
 
 /** Lower-case + strip diacritics from a UTF-8 city name (exposed for tests). */
 void normalizeCity(const char* in, char* out, size_t out_len);

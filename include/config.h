@@ -58,9 +58,22 @@ constexpr bool kAdsbShowGroundAircraft = false;
 // --- Flight route lookup (origin / destination on the aircraft tag) ---
 /** false = never query routes; tag shows only callsign / type / altitude. */
 constexpr bool kRouteLookupEnabled = true;
-/** api.adsbdb.com callsign endpoint (one HTTPS GET per unresolved callsign). */
-constexpr char kRouteApiBase[] = "https://api.adsbdb.com/v0/callsign/";
-/** New callsigns resolved per ADS-B poll (keeps the fetch cycle short). */
+/** hexdb.io route endpoint — returns the two airports as ICAO codes, which are
+ *  resolved to city names locally via data::airports (one HTTPS GET / callsign). */
+constexpr char kRouteApiBase[] = "https://hexdb.io/api/v1/route/icao/";
+/** adsbdb callsign endpoint, queried only for the operating airline name (hexdb
+ *  carries no airline) and only once hexdb has confirmed a route. "" disables
+ *  the airline line and saves that second GET. */
+constexpr char kAirlineApiBase[] = "https://api.adsbdb.com/v0/callsign/";
+/** Suppress a resolved route when the aircraft is farther than this (km) from
+ *  the great-circle corridor between its two airports — a backstop for a stale /
+ *  reused callsign whose route points at the wrong continent. Kept loose on
+ *  purpose: long-haul flights routinely fly 700-1200 km off the great circle to
+ *  skirt closed airspace, so a tight value would hide correct routes. Needs both
+ *  airports in data::airports to apply. 0 disables the check. */
+constexpr float kRouteCorridorMaxKm = 1500.0f;
+/** New callsigns resolved per ADS-B poll (keeps the fetch cycle short). Each is
+ *  up to two HTTPS GETs — hexdb for the route, adsbdb for the airline. */
 constexpr uint8_t kRouteLookupsPerCycle = 3;
 /** Resolved (and "no route") entries cached in RAM; LRU-evicted past this. */
 constexpr size_t kRouteCacheSize = 48;

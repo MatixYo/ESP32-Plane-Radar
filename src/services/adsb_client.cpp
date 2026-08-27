@@ -222,9 +222,10 @@ size_t aircraftCount() { return s_aircraft_count; }
 
 const Aircraft* aircraftList() { return s_aircraft; }
 
-// Cached answers are free; unresolved callsigns cost one HTTPS GET each and are
-// capped per cycle so the ADS-B poll interval is not blown. Runs from the main
-// loop *after* fetchUpdate() so only one WiFiClientSecure is alive at a time.
+// Cached answers are free; unresolved callsigns cost up to two HTTPS GETs each
+// (hexdb route + adsbdb airline) and are capped per cycle so the ADS-B poll
+// interval is not blown. Runs from the main loop *after* fetchUpdate() so only
+// one WiFiClientSecure is alive at a time.
 void resolveRoutes() {
   if (!config::kRouteLookupEnabled) {
     return;
@@ -234,7 +235,7 @@ void resolveRoutes() {
     Aircraft& ac = s_aircraft[i];
     const route::Result r = route::resolve(
         ac.callsign, ac.origin, sizeof(ac.origin), ac.dest, sizeof(ac.dest),
-        ac.airline, sizeof(ac.airline), s_poll_fn, budget > 0);
+        ac.airline, sizeof(ac.airline), ac.lat, ac.lon, s_poll_fn, budget > 0);
     if (r == route::Result::kFetched && budget > 0) {
       --budget;
     }

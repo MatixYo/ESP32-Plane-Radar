@@ -6,7 +6,7 @@
 
 Firmware for an **ESP32-C3 Super Mini** and a **1.28″ round GC9A01** display (240×240). Shows a circular **ADS-B radar** around your configured location, with **WiFiManager** for first-time setup.
 
-> **Personal fork** of [MatixYo/ESP32-Plane-Radar](https://github.com/MatixYo/ESP32-Plane-Radar) (MIT). Adds: callsign → route (origin → destination) and operating airline via [adsbdb](https://www.adsbdb.com/), a fading breadcrumb trail per aircraft, climb/descent indicator, Italian city exonyms, expanded regional airport/runway data, tag-collision cycling, and the adsb.fi HTTP/1.0 chunked-encoding fix ([#82](https://github.com/MatixYo/ESP32-Plane-Radar/issues/82)). Upstream copyright and licence are unchanged; see [LICENSE](LICENSE).
+> **Personal fork** of [MatixYo/ESP32-Plane-Radar](https://github.com/MatixYo/ESP32-Plane-Radar) (MIT). Adds: callsign → route (origin → destination) via [hexdb](https://hexdb.io/) with a local ICAO→city table and a great-circle corridor sanity check, operating airline via [adsbdb](https://www.adsbdb.com/), a fading breadcrumb trail per aircraft, climb/descent indicator, Italian city exonyms, expanded regional airport/runway data, tag-collision cycling, and the adsb.fi HTTP/1.0 chunked-encoding fix ([#82](https://github.com/MatixYo/ESP32-Plane-Radar/issues/82)). Upstream copyright and licence are unchanged; see [LICENSE](LICENSE).
 
 ## What it does
 
@@ -79,7 +79,7 @@ Preset and miles/km choice persist across reboot (`planeradar` NVS namespace).
 
 ### Aircraft
 
-- **Inside the outer ring** — red heading triangle, yellow breadcrumb trail of the last `kTrackHistoryDepth` fixes (~3 min; fading toward the oldest, cut off at the ring), callsign / type / altitude tags. The type line also carries the operating airline (`A320 Ryanair`) when the callsign resolves to a scheduled flight — same source as the route line, no extra request
+- **Inside the outer ring** — red heading triangle, yellow breadcrumb trail of the last `kTrackHistoryDepth` fixes (~3 min; fading toward the oldest, cut off at the ring), callsign / type / altitude tags. The type line also carries the operating airline (`A320 Ryanair`) when the callsign resolves to a scheduled flight (from adsbdb; see Route below)
 - **Climb / descent** — small triangle on the altitude tag line, just before the altitude value: green pointing up for a climb, amber pointing down for a descent; hidden below ±`kVertRateThresholdFpm` (200 ft/min) so level cruise stays clean. Source: `baro_rate`, else `geom_rate` from adsb.fi
 - **Outside the ring** (still within ADS-B fetch) — small **red dot on the screen rim** at the correct bearing (direction cue; not distance-accurate past the ring)
 - **Tags** — placed toward the **center**: west (left) → tag on the **right** of the symbol; east (right) → tag on the **left**
@@ -92,22 +92,35 @@ As range decreases (or aircraft approach), targets move inward; beyond-ring dots
 A fourth tag line shows `Origin>Destination` (muted green) when the callsign
 resolves to a scheduled flight:
 
-- Source: [adsbdb](https://www.adsbdb.com/) — one HTTPS `GET /v0/callsign/<cs>` per
-  callsign (ADS-B itself carries no route). Runs from the main loop *after* the
-  ADS-B fetch so only one `WiFiClientSecure` is alive at once (two exhaust the
-  C3 heap → `SSL - Memory allocation failed`). The same response also yields the
-  operating airline name shown on the type line.
-- Results are cached in RAM: a route or a firm "no route" (adsbdb answers an
+- **Route** from [hexdb.io](https://hexdb.io/) — one HTTPS `GET /api/v1/route/icao/<cs>`
+  per callsign, returning the two airports as ICAO codes (`VIDP-EGLL`). ADS-B
+  itself carries no route. Runs from the main loop *after* the ADS-B fetch so
+  only one `WiFiClientSecure` is alive at once (two exhaust the C3 heap →
+  `SSL - Memory allocation failed`).
+- **ICAO → city** is resolved locally from `src/data/airports_data.cpp` (a
+  binary-searched table: every `large_airport` worldwide + Italian
+  medium/small, with IATA code and position). No network call.
+- **Airline name** on the type line comes from a second `GET` to
+  [adsbdb](https://www.adsbdb.com/) `/v0/callsign/<cs>` (hexdb has no airline),
+  issued only once hexdb has confirmed a route. Set `kAirlineApiBase = ""` to
+  drop the airline line and that request.
+- **Corridor check**: with both airports in the table, a route whose great-circle
+  corridor the aircraft is more than `kRouteCorridorMaxKm` (1500 km, loose on
+  purpose — long-haul reroutes around closed airspace run 700–1200 km wide) away
+  from is treated as a stale callsign match and the route line is hidden (the
+  airline still shows). `0` disables it.
+- Results are cached in RAM: a route or a firm "no route" (hexdb answers an
   unknown callsign with **HTTP 404** + a valid body) holds for
   `kRouteNegativeTtlMs`; a soft failure (timeout, TLS OOM) retries after the
   shorter `kRouteRetryTtlMs`. Only `kRouteLookupsPerCycle` **new** callsigns are
   queried per ADS-B poll, so the fetch cycle stays short.
 - Endpoint label preference: **Italian exonym** (`Londra`), else the city's own
   name ASCII-folded (`Malaga`, `Katowice`, `Bastia`), else the **IATA** code
-  (`AGP`) when adsbdb returns no city.
+  (`AGP`), else the **ICAO** code when the airport is not in the table.
 - The exonym table is `src/data/city_exonyms_data.cpp` (hand-curated). Reseed
   candidates with `python3 scripts/build_city_exonyms.py` (Wikidata + OurAirports)
-  and prune before committing.
+  and prune before committing. Rebuild the airport table with
+  `python3 scripts/build_airports.py` (edit `LOCAL_COUNTRIES` to widen it).
 - General aviation, military and non-scheduled callsigns simply have no route.
 - Turn the whole feature off with `kRouteLookupEnabled = false` in `config.h`.
 
@@ -130,7 +143,7 @@ Edit **`include/config.h`** for hardware and behavior:
 | Display SPI | pins, `kDisplayInvert`, `kDisplayRgbOrder`, `kDisplaySpiWriteHz` |
 | Default location | `kDefaultRadarLat`, `kDefaultRadarLon` (until portal overrides) |
 | ADS-B | `kAdsbFetchIntervalMs`, `kAdsbShowGroundAircraft` |
-| Route lookup | `kRouteLookupEnabled`, `kRouteApiBase`, `kRouteLookupsPerCycle`, `kRouteCacheSize`, `kRouteNegativeTtlMs`, `kRouteRetryTtlMs` |
+| Route lookup | `kRouteLookupEnabled`, `kRouteApiBase` (hexdb), `kAirlineApiBase` (adsbdb, `""` to disable), `kRouteCorridorMaxKm`, `kRouteLookupsPerCycle`, `kRouteCacheSize`, `kRouteNegativeTtlMs`, `kRouteRetryTtlMs` |
 | Track trail | `kTrackHistoryDepth`, `kTrackHistoryMax`, `kTrackHistoryTtlMs`, `kTrackHistoryMinStepDeg2` |
 
 Range presets: `include/ui/radar_range.h` (`kRangePresets`).
@@ -146,6 +159,7 @@ include/
     display_font.h
   data/
     large_airports.h
+    airports.h              — ICAO → city / IATA / position (route endpoints)
     city_exonyms.h
   ui/
     radar_theme.h
@@ -163,16 +177,18 @@ data/
   ui_font.vlw              — embedded smooth UI font (Noto Sans Bold)
 scripts/
   build_large_airports.py
+  build_airports.py         — regenerates data/airports*.{h,cpp} from OurAirports
   build_city_exonyms.py
 src/
   main.cpp
   data/
     large_airports_data.cpp
+    airports_data.cpp
     city_exonyms_data.cpp
   hardware/
   ui/
   services/
-    flight_route.cpp        — callsign → origin/destination (adsbdb, cached)
+    flight_route.cpp        — callsign → origin/destination (hexdb + local ICAO table, cached)
     track_history.cpp       — per-aircraft breadcrumb ring (keyed by ICAO hex)
 ```
 

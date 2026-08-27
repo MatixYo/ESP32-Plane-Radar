@@ -6,9 +6,11 @@
 #include <ArduinoJson.h>
 
 #include <cctype>
+#include <cmath>
 #include <cstring>
 
 #include "config.h"
+#include "data/airports.h"
 #include "data/city_exonyms.h"
 
 namespace services::route {
@@ -23,6 +25,10 @@ struct CacheEntry {
   char origin[20] = {0};
   char dest[20] = {0};
   char airline[24] = {0};      // operator name, ASCII-folded ("" if unknown)
+  float o_lat = NAN;           // route endpoint coords (NAN = airport unknown),
+  float o_lon = NAN;           // used for the corridor sanity check
+  float d_lat = NAN;
+  float d_lon = NAN;
   bool has_route = false;      // false = negative (no route for this callsign)
   bool soft_fail = false;      // negative only because the lookup itself failed
   bool occupied = false;
@@ -212,37 +218,147 @@ const char* italianForCity(const char* municipality) {
   return nullptr;
 }
 
-// Fill `out` for one route endpoint. Preference: Italian exonym (Londra),
-// then the city's own name ASCII-folded (Malaga, Katowice, Bastia), and only
-// the IATA code (AGP) when adsbdb gives no city.
-void formatEndpoint(JsonObjectConst ep, char* out, size_t out_len) {
+// --- airport table -------------------------------------------------------
+
+// Binary search of the ICAO-sorted data::airports::kAirports table.
+const data::airports::Airport* airportByIcao(const char* icao) {
+  if (icao == nullptr || strlen(icao) != 4) {
+    return nullptr;
+  }
+  size_t lo = 0, hi = data::airports::kAirportCount;
+  while (lo < hi) {
+    const size_t mid = lo + (hi - lo) / 2;
+    const int cmp = strcmp(icao, data::airports::kAirports[mid].icao);
+    if (cmp == 0) {
+      return &data::airports::kAirports[mid];
+    }
+    if (cmp < 0) {
+      hi = mid;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  return nullptr;
+}
+
+// Label for one route endpoint. Preference: Italian exonym (Londra), then the
+// city's own name (Malaga), then the IATA code (AGP), then the ICAO code.
+void labelForAirport(const data::airports::Airport* ap, const char* icao,
+                     char* out, size_t out_len) {
   out[0] = '\0';
-  if (out_len == 0 || ep.isNull()) {
+  if (out_len == 0) {
     return;
   }
-  const char* muni = ep["municipality"].as<const char*>();
-  const char* it = italianForCity(muni);
-  if (it != nullptr) {
-    strncpy(out, it, out_len - 1);
-    out[out_len - 1] = '\0';
-    return;
-  }
-  if (muni != nullptr && muni[0] != '\0') {
-    foldAscii(muni, out, out_len, /*lower=*/false);
-    if (out[0] != '\0') {
+  if (ap != nullptr) {
+    const char* it = italianForCity(ap->city);
+    if (it != nullptr) {
+      strncpy(out, it, out_len - 1);
+      out[out_len - 1] = '\0';
+      return;
+    }
+    if (ap->city[0] != '\0') {
+      foldAscii(ap->city, out, out_len, /*lower=*/false);
+      if (out[0] != '\0') {
+        return;
+      }
+    }
+    if (ap->iata[0] != '\0') {
+      strncpy(out, ap->iata, out_len - 1);
+      out[out_len - 1] = '\0';
       return;
     }
   }
-  const char* iata = ep["iata_code"].as<const char*>();
-  if (iata != nullptr && iata[0] != '\0') {
-    strncpy(out, iata, out_len - 1);
+  if (icao != nullptr && icao[0] != '\0') {
+    strncpy(out, icao, out_len - 1);
     out[out_len - 1] = '\0';
   }
 }
 
+// --- corridor sanity check --------------------------------------------------
+
+double toRad(double d) { return d * (M_PI / 180.0); }
+
+// Angular distance (radians) between two lat/lon points — haversine.
+double angularDist(double lat1, double lon1, double lat2, double lon2) {
+  const double p1 = toRad(lat1), p2 = toRad(lat2);
+  const double dp = toRad(lat2 - lat1), dl = toRad(lon2 - lon1);
+  const double a = sin(dp / 2) * sin(dp / 2) +
+                   cos(p1) * cos(p2) * sin(dl / 2) * sin(dl / 2);
+  return 2.0 * atan2(sqrt(a), sqrt(1.0 - a));
+}
+
+double initialBearing(double lat1, double lon1, double lat2, double lon2) {
+  const double p1 = toRad(lat1), p2 = toRad(lat2), dl = toRad(lon2 - lon1);
+  const double y = sin(dl) * cos(p2);
+  const double x = cos(p1) * sin(p2) - sin(p1) * cos(p2) * cos(dl);
+  return atan2(y, x);
+}
+
+// How far (km) the aircraft at P lies outside the corridor around the great
+// circle from A to B: the cross-track distance, widened when P sits beyond
+// either endpoint along the track. ~0 for a plane genuinely en route.
+float corridorDistKm(float plat, float plon, float alat, float alon,
+                     float blat, float blon) {
+  constexpr double R = 6371.0;
+  const double d13 = angularDist(alat, alon, plat, plon);
+  const double t13 = initialBearing(alat, alon, plat, plon);
+  const double t12 = initialBearing(alat, alon, blat, blon);
+  const double leg = R * angularDist(alat, alon, blat, blon);
+
+  double off = fabs(asin(sin(d13) * sin(t13 - t12))) * R;  // cross-track
+  const double along = R * d13 * cos(t13 - t12);           // along-track from A
+  if (along < 0.0) {
+    off = fmax(off, -along);
+  } else if (along > leg) {
+    off = fmax(off, along - leg);
+  }
+  return static_cast<float>(off);
+}
+
+// True when the route may be shown: no coords to check against, the check is
+// disabled, or the aircraft is within the corridor.
+bool routeFitsPosition(const CacheEntry& e, float ac_lat, float ac_lon) {
+  if (config::kRouteCorridorMaxKm <= 0.0f) {
+    return true;
+  }
+  if (isnan(e.o_lat) || isnan(e.o_lon) || isnan(e.d_lat) || isnan(e.d_lon)) {
+    return true;  // an endpoint airport is not in the table — cannot judge
+  }
+  if (isnan(ac_lat) || isnan(ac_lon) || (ac_lat == 0.0f && ac_lon == 0.0f)) {
+    return true;
+  }
+  return corridorDistKm(ac_lat, ac_lon, e.o_lat, e.o_lon, e.d_lat, e.d_lon) <=
+         config::kRouteCorridorMaxKm;
+}
+
+// Copy a cached hit into the caller's buffers. The airline always comes
+// through; origin/dest are withheld when the aircraft is nowhere near the
+// corridor between them (stale callsign reuse).
+void fillFromCache(const CacheEntry& e, float ac_lat, float ac_lon, char* origin,
+                   size_t origin_len, char* dest, size_t dest_len, char* airline,
+                   size_t airline_len) {
+  if (airline_len) {
+    strncpy(airline, e.airline, airline_len - 1);
+    airline[airline_len - 1] = '\0';
+  }
+  if (!routeFitsPosition(e, ac_lat, ac_lon)) {
+    return;
+  }
+  if (origin_len) {
+    strncpy(origin, e.origin, origin_len - 1);
+    origin[origin_len - 1] = '\0';
+  }
+  if (dest_len) {
+    strncpy(dest, e.dest, dest_len - 1);
+    dest[dest_len - 1] = '\0';
+  }
+}
+
+// --- HTTP ----------------------------------------------------------------
+
 // Returns the HTTP status code (0 on transport failure). The body is read for
-// 200 and for 404 — adsbdb answers an unknown callsign with 404 + a valid
-// {"response":"unknown callsign"} JSON body, which is a firm "no route".
+// 200 and for 404 — both hexdb ("Route not found.") and adsbdb ("unknown
+// callsign") answer a miss with 404 plus a valid JSON body, a firm "no route".
 int httpGetBody(const String& url, String& payload, PollFn poll) {
   WiFiClientSecure client;
   client.setInsecure();
@@ -251,8 +367,8 @@ int httpGetBody(const String& url, String& payload, PollFn poll) {
   if (!http.begin(client, url)) {
     return 0;
   }
-  // adsbdb is also fronted by a CDN that chunks HTTP/1.1 responses without a
-  // Content-Length; force HTTP/1.0 so the body arrives unframed (same reason
+  // hexdb and adsbdb both sit behind a CDN that chunks HTTP/1.1 responses with
+  // no Content-Length; force HTTP/1.0 so the body arrives unframed (same reason
   // as adsb_client).
   http.useHTTP10(true);
   http.setConnectTimeout(kConnectAttemptMs);
@@ -294,11 +410,56 @@ int httpGetBody(const String& url, String& payload, PollFn poll) {
   return payload.length() > 0 ? code : 0;
 }
 
+// --- hexdb route parsing -------------------------------------------------
+
+// Pull the first and last ICAO codes out of a hexdb "route" value
+// ("EBCI-LIME", or "A-B-C" for a multi-leg entry). Returns false when the
+// value holds no usable code.
+bool splitRoute(const char* route, char origin_icao[5], char dest_icao[5]) {
+  origin_icao[0] = '\0';
+  dest_icao[0] = '\0';
+  if (route == nullptr) {
+    return false;
+  }
+  char first[5] = {0};
+  char last[5] = {0};
+  size_t tok_len = 0;
+  char tok[5] = {0};
+  for (const char* p = route;; ++p) {
+    if (*p != '\0' && *p != '-') {
+      if (tok_len < 4) {
+        tok[tok_len] = static_cast<char>(toupper(static_cast<unsigned char>(*p)));
+      }
+      ++tok_len;
+    } else {
+      if (tok_len == 4) {
+        tok[4] = '\0';
+        if (first[0] == '\0') {
+          strcpy(first, tok);
+        }
+        strcpy(last, tok);
+      }
+      tok_len = 0;
+      if (*p == '\0') {
+        break;
+      }
+    }
+  }
+  if (first[0] == '\0') {
+    return false;
+  }
+  strcpy(origin_icao, first);
+  if (strcmp(first, last) != 0) {
+    strcpy(dest_icao, last);
+  }
+  return true;
+}
+
 }  // namespace
 
-Result resolve(const char* callsign, char* origin, size_t origin_len,
-               char* dest, size_t dest_len, char* airline, size_t airline_len,
-               PollFn poll, bool allow_network) {
+Result resolve(const char* callsign, char* origin, size_t origin_len, char* dest,
+               size_t dest_len, char* airline, size_t airline_len, float ac_lat,
+               float ac_lon, PollFn poll, bool allow_network) {
   if (origin_len > 0) {
     origin[0] = '\0';
   }
@@ -327,12 +488,8 @@ Result resolve(const char* callsign, char* origin, size_t origin_len,
     if (!negative_expired) {
       entry->used_ms = now;
       if (entry->has_route) {
-        strncpy(origin, entry->origin, origin_len ? origin_len - 1 : 0);
-        strncpy(dest, entry->dest, dest_len ? dest_len - 1 : 0);
-        strncpy(airline, entry->airline, airline_len ? airline_len - 1 : 0);
-        if (origin_len) origin[origin_len - 1] = '\0';
-        if (dest_len) dest[dest_len - 1] = '\0';
-        if (airline_len) airline[airline_len - 1] = '\0';
+        fillFromCache(*entry, ac_lat, ac_lon, origin, origin_len, dest, dest_len,
+                      airline, airline_len);
       }
       return Result::kFromCache;
     }
@@ -342,6 +499,7 @@ Result resolve(const char* callsign, char* origin, size_t origin_len,
     return Result::kSkippedNoBudget;
   }
 
+  // --- hexdb: callsign -> "ICAO-ICAO" ---
   String url = config::kRouteApiBase;
   url += callsign;
 
@@ -351,28 +509,53 @@ Result resolve(const char* callsign, char* origin, size_t origin_len,
   char new_origin[sizeof(CacheEntry::origin)] = {0};
   char new_dest[sizeof(CacheEntry::dest)] = {0};
   char new_airline[sizeof(CacheEntry::airline)] = {0};
-  bool parsed = false;  // got a well-formed response (route or "unknown")
+  float o_lat = NAN, o_lon = NAN, d_lat = NAN, d_lon = NAN;
+  bool parsed = false;  // got a well-formed response (route or "not found")
 
   if (code != 0) {
     JsonDocument doc;
     if (deserializeJson(doc, payload) == DeserializationError::Ok) {
       parsed = true;
-      JsonObjectConst fr = doc["response"]["flightroute"].as<JsonObjectConst>();
-      if (!fr.isNull()) {
-        formatEndpoint(fr["origin"].as<JsonObjectConst>(), new_origin,
-                       sizeof(new_origin));
-        formatEndpoint(fr["destination"].as<JsonObjectConst>(), new_dest,
-                       sizeof(new_dest));
-        const char* al_name = fr["airline"]["name"].as<const char*>();
+      const char* route = doc["route"].as<const char*>();
+      char oi[5], di[5];
+      if (route != nullptr && splitRoute(route, oi, di)) {
+        const data::airports::Airport* oa = airportByIcao(oi);
+        const data::airports::Airport* da = airportByIcao(di);
+        labelForAirport(oa, oi, new_origin, sizeof(new_origin));
+        labelForAirport(da, di[0] ? di : nullptr, new_dest, sizeof(new_dest));
+        if (di[0] == '\0') {
+          new_dest[0] = '\0';
+        }
+        if (oa != nullptr) {
+          o_lat = oa->lat_e7 / 1e7f;
+          o_lon = oa->lon_e7 / 1e7f;
+        }
+        if (da != nullptr) {
+          d_lat = da->lat_e7 / 1e7f;
+          d_lon = da->lon_e7 / 1e7f;
+        }
+      }
+    }
+  }
+
+  const bool has_route = new_origin[0] != '\0' || new_dest[0] != '\0';
+
+  // --- adsbdb: airline name only (hexdb carries none) ---
+  if (has_route && config::kAirlineApiBase[0] != '\0') {
+    String aurl = config::kAirlineApiBase;
+    aurl += callsign;
+    String apayload;
+    if (httpGetBody(aurl, apayload, poll) != 0) {
+      JsonDocument adoc;
+      if (deserializeJson(adoc, apayload) == DeserializationError::Ok) {
+        const char* al_name =
+            adoc["response"]["flightroute"]["airline"]["name"].as<const char*>();
         if (al_name != nullptr && al_name[0] != '\0') {
           foldAscii(al_name, new_airline, sizeof(new_airline), /*lower=*/false);
         }
       }
     }
   }
-
-  const bool has_route =
-      new_origin[0] != '\0' || new_dest[0] != '\0' || new_airline[0] != '\0';
 
   // Always cache the outcome so a callsign is not re-queried every poll. A
   // parsed answer (route, or a firm "no route") holds for kRouteNegativeTtlMs;
@@ -386,23 +569,27 @@ Result resolve(const char* callsign, char* origin, size_t origin_len,
   strcpy(entry->origin, new_origin);
   strcpy(entry->dest, new_dest);
   strcpy(entry->airline, new_airline);
+  entry->o_lat = o_lat;
+  entry->o_lon = o_lon;
+  entry->d_lat = d_lat;
+  entry->d_lon = d_lon;
   entry->has_route = has_route;
   entry->soft_fail = !parsed;
   entry->written_ms = now;
   entry->used_ms = now;
 
   if (has_route) {
-    strncpy(origin, new_origin, origin_len ? origin_len - 1 : 0);
-    strncpy(dest, new_dest, dest_len ? dest_len - 1 : 0);
-    strncpy(airline, new_airline, airline_len ? airline_len - 1 : 0);
-    if (origin_len) origin[origin_len - 1] = '\0';
-    if (dest_len) dest[dest_len - 1] = '\0';
-    if (airline_len) airline[airline_len - 1] = '\0';
+    fillFromCache(*entry, ac_lat, ac_lon, origin, origin_len, dest, dest_len,
+                  airline, airline_len);
   }
-  Serial.printf("route: %s [%s] -> %s > %s (http %d%s)\n", callsign,
+  const bool suppressed =
+      has_route && origin_len > 0 && origin[0] == '\0' && dest_len > 0 &&
+      dest[0] == '\0';
+  Serial.printf("route: %s [%s] -> %s > %s (http %d%s%s)\n", callsign,
                 new_airline[0] ? new_airline : "-",
                 new_origin[0] ? new_origin : "?", new_dest[0] ? new_dest : "?",
-                code, parsed ? "" : ", unparsed");
+                code, parsed ? "" : ", unparsed",
+                suppressed ? ", off-corridor" : "");
   return Result::kFetched;
 }
 

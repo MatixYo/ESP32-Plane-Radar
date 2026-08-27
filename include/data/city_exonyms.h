@@ -1,8 +1,9 @@
 // Italian exonyms for airport cities — used to render flight route endpoints
 // (origin / destination) on the aircraft tag in the operator's language.
 //
-// `en` keys are the OurAirports / adsbdb `municipality` string, normalised to
-// lower case with diacritics stripped (see services::route::normalizeCity).
+// `en` keys are the OurAirports `municipality` string (as carried in
+// data::airports), normalised to lower case with diacritics stripped (see
+// services::route::normalizeCity).
 // `it` values are ASCII-only on purpose: the embedded VLW UI font only carries
 // the Latin basic glyph set, so accented forms are transliterated
 // ("Citta del Capo", not "Città del Capo").
