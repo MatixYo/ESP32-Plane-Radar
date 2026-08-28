@@ -35,17 +35,22 @@ During setup you can also hold BOOT at power-on to force a credential reset (sam
 **Reconfigure anytime** (after the device is on your network):
 
 1. Open **`http://plane-radar.local`** or **`http://<device-ip>`** (e.g. from your router or serial log at boot)
-2. Change Wi‑Fi, location, units, or runway overlay; save
+2. Change the Wi‑Fi network here, or follow the **Radar Settings** button on this page for everything else (below)
 
-The same portal runs on the setup AP and on the device’s LAN IP while connected to Wi‑Fi. mDNS hostname is `plane-radar` → **plane-radar.local** (`kPortalHostname` in `config.h`). Some clients resolve `.local` slowly; use the IP if needed.
+The same portal runs on the setup AP and on the device's LAN IP while connected to Wi‑Fi. mDNS hostname is `plane-radar` → **plane-radar.local** (`kPortalHostname` in `config.h`). Some clients resolve `.local` slowly; use the IP if needed.
 
-**Custom fields** (stored in NVS):
+### Radar settings page
+
+A separate page at **`http://plane-radar.local/settings`** (or `http://<device-ip>/settings`) holds everything other than the Wi‑Fi network itself — linked from a **Radar Settings** button on the Wi‑Fi portal's home page, on both the setup AP and the LAN portal. All fields save to NVS immediately on submit.
 
 | Field | Purpose |
 |-------|---------|
 | **Latitude / Longitude** | Radar center and ADS-B query position (defaults in `config.h` until set) |
+| **Zoom radius** | Same ring presets as the BOOT short-tap (5 / 10 / 15 / 25 km), settable here instead of the physical button |
 | **Display distances in miles** | Ring scale label in **mi** instead of **km** (e.g. `6mi` vs `10km`) |
 | **Show airport runways** | Major-airport runway overlay on the radar (off to hide) |
+| **Show aircraft trail** | Fading breadcrumb trail behind each target (off to hide; symbols and tags are unaffected) |
+| **Show route as city name** | Route tag format: checked = resolved city/exonym name (`Londra>New York`), unchecked = raw IATA/ICAO airport code (`FCO>JFK`) |
 
 After a reset, the device reboots and shows the setup screen immediately (no “Connecting” loop on stale credentials).
 

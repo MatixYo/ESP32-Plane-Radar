@@ -10,6 +10,7 @@
 #include "config.h"
 #include "services/flight_route.h"
 #include "services/track_history.h"
+#include "ui/radar_range.h"
 
 namespace services::adsb {
 
@@ -235,7 +236,8 @@ void resolveRoutes() {
     Aircraft& ac = s_aircraft[i];
     const route::Result r = route::resolve(
         ac.callsign, ac.origin, sizeof(ac.origin), ac.dest, sizeof(ac.dest),
-        ac.airline, sizeof(ac.airline), ac.lat, ac.lon, s_poll_fn, budget > 0);
+        ac.airline, sizeof(ac.airline), ac.lat, ac.lon,
+        ui::radar::routeFullNames(), s_poll_fn, budget > 0);
     if (r == route::Result::kFetched && budget > 0) {
       --budget;
     }

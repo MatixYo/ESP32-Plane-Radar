@@ -22,8 +22,10 @@ constexpr unsigned long kRequestTimeoutMs = 8000;
 
 struct CacheEntry {
   char callsign[9] = {0};
-  char origin[20] = {0};
+  char origin[20] = {0};       // full label: city / exonym / IATA / ICAO
   char dest[20] = {0};
+  char origin_code[5] = {0};   // short label: IATA, else ICAO
+  char dest_code[5] = {0};
   char airline[24] = {0};      // operator name, ASCII-folded ("" if unknown)
   float o_lat = NAN;           // route endpoint coords (NAN = airport unknown),
   float o_lon = NAN;           // used for the corridor sanity check
@@ -274,6 +276,24 @@ void labelForAirport(const data::airports::Airport* ap, const char* icao,
   }
 }
 
+// Short code for one route endpoint: IATA (e.g. "FCO"), else the ICAO code.
+void codeForAirport(const data::airports::Airport* ap, const char* icao,
+                    char* out, size_t out_len) {
+  out[0] = '\0';
+  if (out_len == 0) {
+    return;
+  }
+  if (ap != nullptr && ap->iata[0] != '\0') {
+    strncpy(out, ap->iata, out_len - 1);
+    out[out_len - 1] = '\0';
+    return;
+  }
+  if (icao != nullptr && icao[0] != '\0') {
+    strncpy(out, icao, out_len - 1);
+    out[out_len - 1] = '\0';
+  }
+}
+
 // --- corridor sanity check --------------------------------------------------
 
 double toRad(double d) { return d * (M_PI / 180.0); }
@@ -333,10 +353,11 @@ bool routeFitsPosition(const CacheEntry& e, float ac_lat, float ac_lon) {
 
 // Copy a cached hit into the caller's buffers. The airline always comes
 // through; origin/dest are withheld when the aircraft is nowhere near the
-// corridor between them (stale callsign reuse).
-void fillFromCache(const CacheEntry& e, float ac_lat, float ac_lon, char* origin,
-                   size_t origin_len, char* dest, size_t dest_len, char* airline,
-                   size_t airline_len) {
+// corridor between them (stale callsign reuse). `full_names` picks between
+// the resolved city/exonym label and the short IATA/ICAO code.
+void fillFromCache(const CacheEntry& e, float ac_lat, float ac_lon,
+                   bool full_names, char* origin, size_t origin_len, char* dest,
+                   size_t dest_len, char* airline, size_t airline_len) {
   if (airline_len) {
     strncpy(airline, e.airline, airline_len - 1);
     airline[airline_len - 1] = '\0';
@@ -344,12 +365,14 @@ void fillFromCache(const CacheEntry& e, float ac_lat, float ac_lon, char* origin
   if (!routeFitsPosition(e, ac_lat, ac_lon)) {
     return;
   }
+  const char* origin_src = full_names ? e.origin : e.origin_code;
+  const char* dest_src = full_names ? e.dest : e.dest_code;
   if (origin_len) {
-    strncpy(origin, e.origin, origin_len - 1);
+    strncpy(origin, origin_src, origin_len - 1);
     origin[origin_len - 1] = '\0';
   }
   if (dest_len) {
-    strncpy(dest, e.dest, dest_len - 1);
+    strncpy(dest, dest_src, dest_len - 1);
     dest[dest_len - 1] = '\0';
   }
 }
@@ -459,7 +482,7 @@ bool splitRoute(const char* route, char origin_icao[5], char dest_icao[5]) {
 
 Result resolve(const char* callsign, char* origin, size_t origin_len, char* dest,
                size_t dest_len, char* airline, size_t airline_len, float ac_lat,
-               float ac_lon, PollFn poll, bool allow_network) {
+               float ac_lon, bool full_names, PollFn poll, bool allow_network) {
   if (origin_len > 0) {
     origin[0] = '\0';
   }
@@ -488,8 +511,8 @@ Result resolve(const char* callsign, char* origin, size_t origin_len, char* dest
     if (!negative_expired) {
       entry->used_ms = now;
       if (entry->has_route) {
-        fillFromCache(*entry, ac_lat, ac_lon, origin, origin_len, dest, dest_len,
-                      airline, airline_len);
+        fillFromCache(*entry, ac_lat, ac_lon, full_names, origin, origin_len,
+                      dest, dest_len, airline, airline_len);
       }
       return Result::kFromCache;
     }
@@ -508,6 +531,8 @@ Result resolve(const char* callsign, char* origin, size_t origin_len, char* dest
 
   char new_origin[sizeof(CacheEntry::origin)] = {0};
   char new_dest[sizeof(CacheEntry::dest)] = {0};
+  char new_origin_code[sizeof(CacheEntry::origin_code)] = {0};
+  char new_dest_code[sizeof(CacheEntry::dest_code)] = {0};
   char new_airline[sizeof(CacheEntry::airline)] = {0};
   float o_lat = NAN, o_lon = NAN, d_lat = NAN, d_lon = NAN;
   bool parsed = false;  // got a well-formed response (route or "not found")
@@ -523,8 +548,12 @@ Result resolve(const char* callsign, char* origin, size_t origin_len, char* dest
         const data::airports::Airport* da = airportByIcao(di);
         labelForAirport(oa, oi, new_origin, sizeof(new_origin));
         labelForAirport(da, di[0] ? di : nullptr, new_dest, sizeof(new_dest));
+        codeForAirport(oa, oi, new_origin_code, sizeof(new_origin_code));
+        codeForAirport(da, di[0] ? di : nullptr, new_dest_code,
+                       sizeof(new_dest_code));
         if (di[0] == '\0') {
           new_dest[0] = '\0';
+          new_dest_code[0] = '\0';
         }
         if (oa != nullptr) {
           o_lat = oa->lat_e7 / 1e7f;
@@ -568,6 +597,8 @@ Result resolve(const char* callsign, char* origin, size_t origin_len, char* dest
   entry->callsign[sizeof(entry->callsign) - 1] = '\0';
   strcpy(entry->origin, new_origin);
   strcpy(entry->dest, new_dest);
+  strcpy(entry->origin_code, new_origin_code);
+  strcpy(entry->dest_code, new_dest_code);
   strcpy(entry->airline, new_airline);
   entry->o_lat = o_lat;
   entry->o_lon = o_lon;
@@ -579,8 +610,8 @@ Result resolve(const char* callsign, char* origin, size_t origin_len, char* dest
   entry->used_ms = now;
 
   if (has_route) {
-    fillFromCache(*entry, ac_lat, ac_lon, origin, origin_len, dest, dest_len,
-                  airline, airline_len);
+    fillFromCache(*entry, ac_lat, ac_lon, full_names, origin, origin_len, dest,
+                  dest_len, airline, airline_len);
   }
   const bool suppressed =
       has_route && origin_len > 0 && origin[0] == '\0' && dest_len > 0 &&

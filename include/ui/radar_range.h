@@ -38,6 +38,9 @@ constexpr size_t kRangePresetCount =
 void rangeInit();
 /** Cycle preset and save to flash. */
 void rangeNext();
+/** Jump directly to a preset (e.g. from the WiFi portal). Out-of-range values
+ *  wrap via modulo so a stale/garbage index cannot brick the display. */
+void setRangeIndex(uint8_t idx);
 const RangePreset& rangeCurrent();
 uint8_t rangeIndex();
 /** ADSB fetch radius (km): scaled to screen edge so beyond-ring dots have data. */
@@ -45,9 +48,16 @@ float fetchRadiusKm();
 
 bool useMiles();
 bool showRunways();
+/** Breadcrumb trail (recent-fixes trail) behind each aircraft. */
+bool showTrail();
+/** Route tag: true = resolved city/exonym name (default), false = raw
+ *  IATA/ICAO airport code. */
+bool routeFullNames();
 /** WiFi portal checkbox: "T" = miles, otherwise km. */
 void saveMilesFromPortal(const char* checkbox_value);
 void saveRunwaysFromPortal(const char* checkbox_value);
+void saveShowTrailFromPortal(const char* checkbox_value);
+void saveRouteFullNamesFromPortal(const char* checkbox_value);
 void formatRing3Label(char* buf, size_t len, float ring3_km, bool use_miles);
 void formatCurrentRing3Label(char* buf, size_t len);
 /** Reset distance units to km (e.g. with WiFi credential wipe). */

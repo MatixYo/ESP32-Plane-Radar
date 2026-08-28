@@ -698,7 +698,9 @@ void drawAircraft() {
     const size_t i = items[d].index;
     const int x = items[d].x;
     const int y = items[d].y;
-    drawTrackPath(planes[i].hex, x, y);
+    if (radar::showTrail()) {
+      drawTrackPath(planes[i].hex, x, y);
+    }
     drawHeadingTriangle(x, y, planes[i].nose_deg, radar::kColorAircraft);
   }
 

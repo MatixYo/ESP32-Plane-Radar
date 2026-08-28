@@ -15,6 +15,8 @@ constexpr char kPrefsNamespace[] = "planeradar";
 constexpr char kPrefsRangeKey[] = "rangeIdx";
 constexpr char kPrefsMilesKey[] = "useMiles";
 constexpr char kPrefsRunwaysKey[] = "showRwys";
+constexpr char kPrefsTrailKey[] = "showTrail";
+constexpr char kPrefsRouteFullKey[] = "routeFull";
 constexpr uint8_t kDefaultRangeIndex = 1;  // 10 km ring
 constexpr float kKmPerMile = 1.609344f;
 
@@ -22,6 +24,8 @@ Preferences s_prefs;
 uint8_t s_range_index = kDefaultRangeIndex;
 bool s_use_miles = false;
 bool s_show_runways = true;
+bool s_show_trail = true;
+bool s_route_full_names = true;
 
 void saveRangeIndex() {
   if (!s_prefs.begin(kPrefsNamespace, false)) {
@@ -44,6 +48,22 @@ void saveShowRunways() {
     return;
   }
   s_prefs.putBool(kPrefsRunwaysKey, s_show_runways);
+  s_prefs.end();
+}
+
+void saveShowTrail() {
+  if (!s_prefs.begin(kPrefsNamespace, false)) {
+    return;
+  }
+  s_prefs.putBool(kPrefsTrailKey, s_show_trail);
+  s_prefs.end();
+}
+
+void saveRouteFullNames() {
+  if (!s_prefs.begin(kPrefsNamespace, false)) {
+    return;
+  }
+  s_prefs.putBool(kPrefsRouteFullKey, s_route_full_names);
   s_prefs.end();
 }
 
@@ -70,11 +90,22 @@ void rangeInit() {
       (saved < kRangePresetCount) ? saved : kDefaultRangeIndex;
   s_use_miles = s_prefs.getBool(kPrefsMilesKey, false);
   s_show_runways = s_prefs.getBool(kPrefsRunwaysKey, true);
+  s_show_trail = s_prefs.getBool(kPrefsTrailKey, true);
+  s_route_full_names = s_prefs.getBool(kPrefsRouteFullKey, true);
   s_prefs.end();
 }
 
 void rangeNext() {
   s_range_index = static_cast<uint8_t>((s_range_index + 1) % kRangePresetCount);
+  saveRangeIndex();
+}
+
+void setRangeIndex(uint8_t idx) {
+  const uint8_t clamped = static_cast<uint8_t>(idx % kRangePresetCount);
+  if (clamped == s_range_index) {
+    return;
+  }
+  s_range_index = clamped;
   saveRangeIndex();
 }
 
@@ -93,6 +124,10 @@ bool useMiles() { return s_use_miles; }
 
 bool showRunways() { return s_show_runways; }
 
+bool showTrail() { return s_show_trail; }
+
+bool routeFullNames() { return s_route_full_names; }
+
 void saveMilesFromPortal(const char* checkbox_value) {
   s_use_miles = portalCheckboxChecked(checkbox_value);
   saveUseMiles();
@@ -103,6 +138,18 @@ void saveRunwaysFromPortal(const char* checkbox_value) {
   s_show_runways = portalCheckboxChecked(checkbox_value);
   saveShowRunways();
   Serial.printf("Runway overlay: %s\n", s_show_runways ? "on" : "off");
+}
+
+void saveShowTrailFromPortal(const char* checkbox_value) {
+  s_show_trail = portalCheckboxChecked(checkbox_value);
+  saveShowTrail();
+  Serial.printf("Track trail: %s\n", s_show_trail ? "on" : "off");
+}
+
+void saveRouteFullNamesFromPortal(const char* checkbox_value) {
+  s_route_full_names = portalCheckboxChecked(checkbox_value);
+  saveRouteFullNames();
+  Serial.printf("Route label: %s\n", s_route_full_names ? "city name" : "code");
 }
 
 void formatRing3Label(char* buf, size_t len, float ring3_km, bool use_miles) {
@@ -122,9 +169,13 @@ void formatCurrentRing3Label(char* buf, size_t len) {
 void unitsReset() {
   s_use_miles = false;
   s_show_runways = true;
+  s_show_trail = true;
+  s_route_full_names = true;
   if (s_prefs.begin(kPrefsNamespace, false)) {
     s_prefs.remove(kPrefsMilesKey);
     s_prefs.remove(kPrefsRunwaysKey);
+    s_prefs.remove(kPrefsTrailKey);
+    s_prefs.remove(kPrefsRouteFullKey);
     s_prefs.end();
   }
 }
