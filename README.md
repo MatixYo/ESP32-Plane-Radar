@@ -33,7 +33,7 @@ During setup you can also hold BOOT at power-on to force a credential reset (sam
 **Reconfigure anytime** (after the device is on your network):
 
 1. Open **`http://plane-radar.local`** or **`http://<device-ip>`** (e.g. from your router or serial log at boot)
-2. Change Wi‑Fi, location, units, or runway overlay; save
+2. Change Wi‑Fi, location, units, runway overlay, or radar sweep; save
 
 The same portal runs on the setup AP and on the device’s LAN IP while connected to Wi‑Fi. mDNS hostname is `plane-radar` → **plane-radar.local** (`kPortalHostname` in `config.h`). Some clients resolve `.local` slowly; use the IP if needed.
 
@@ -44,6 +44,7 @@ The same portal runs on the setup AP and on the device’s LAN IP while connecte
 | **Latitude / Longitude** | Radar center and ADS-B query position (defaults in `config.h` until set) |
 | **Display distances in miles** | Ring scale label in **mi** instead of **km** (e.g. `6mi` vs `10km`) |
 | **Show airport runways** | Major-airport runway overlay on the radar (off to hide) |
+| **Show radar sweep** | Animated radar sweep (off also gives ADS-B fetching normal task priority) |
 
 After a reset, the device reboots and shows the setup screen immediately (no “Connecting” loop on stale credentials).
 
@@ -88,6 +89,16 @@ As range decreases (or aircraft approach), targets move inward; beyond-ring dots
 - Fetch radius: `ui::radar::fetchRadiusKm()` — scales with the active preset to roughly the screen edge (so rim dots have data)
 - Poll interval: `kAdsbFetchIntervalMs` (5 s) in `config.h`
 - Ground aircraft hidden by default (`kAdsbShowGroundAircraft`)
+
+#### API response compatibility
+
+In August 2026, ADS-B.fi responses began arriving with HTTP/1.1 chunked
+transfer framing. The ESP32 Arduino `HTTPClient::getStream()` interface exposes
+that framing to its consumer, causing ArduinoJson to interpret the first chunk
+size as the complete response and display no aircraft. The client requests an
+HTTP/1.0 connection-close response to keep direct, filtered JSON streaming
+without buffering the full response in the ESP32's limited RAM. See upstream
+[issue #82](https://github.com/MatixYo/ESP32-Plane-Radar/issues/82).
 
 ## Configuration
 

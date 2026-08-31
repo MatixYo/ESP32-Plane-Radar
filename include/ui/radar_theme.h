@@ -31,6 +31,15 @@ constexpr float kGridStrokeHalfWidth = 1.0f;
 
 constexpr int kCenterDotRadius = 2;
 
+/** Clockwise sweep animation: one revolution and display update cadence. */
+constexpr unsigned long kSweepRevolutionMs = 3000;
+constexpr unsigned long kSweepFrameIntervalMs = 25;
+constexpr float kSweepStepDegrees = 3.0f;
+constexpr float kSweepLineHalfWidth = 1.0f;
+constexpr uint8_t kSweepR = 40;
+constexpr uint8_t kSweepG = 255;
+constexpr uint8_t kSweepB = 90;
+
 /** Filled aircraft symbol (nose triangle). */
 constexpr int kAircraftNoseLenPx = 8;
 constexpr int kAircraftTailLenPx = 3;
@@ -99,5 +108,6 @@ extern uint16_t kColorTagType;
 extern uint16_t kColorTagAltitude;
 extern uint16_t kColorRunway;
 extern uint16_t kColorRunwayLabel;
+extern uint16_t kColorSweep;
 
 }  // namespace ui::radar
