@@ -277,6 +277,14 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
 
   s_aircraft_count = n;
   Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
+  for (size_t i = 0; i < n; ++i) {
+    Serial.printf("  [%u] %s  %.4f,%.4f  %s  trk=%.0f gs=%.0f\n",
+                  static_cast<unsigned>(i),
+                  s_aircraft[i].callsign[0] != '\0' ? s_aircraft[i].callsign
+                                                    : "(no id)",
+                  s_aircraft[i].lat, s_aircraft[i].lon, s_aircraft[i].alt,
+                  s_aircraft[i].track_deg, s_aircraft[i].gs_knots);
+  }
   return true;
 }
 

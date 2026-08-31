@@ -30,19 +30,14 @@ constexpr unsigned long kBootResetHoldMs = 3000UL;
 constexpr unsigned long kBootTapMinMs = 40UL;
 
 // --- Display: GC9A01 1.28" round 240×240 (SPI) ---
-constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_0;
-constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_1;
-constexpr gpio_num_t kDisplayPinDc = GPIO_NUM_10;
-constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_3;  // display SDA
-constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_4;  // display SCL
-
+// Per-board pin wiring and color order live in hardware/board.h (selectable at
+// compile time via -DBOARD_ESP32_2424S012 and at runtime via the setup portal).
 constexpr int kDisplayWidth = 240;
 constexpr int kDisplayHeight = 240;
 
 constexpr uint32_t kDisplaySpiWriteHz = 40000000;
-// GC9A01 modules often need invert + BGR for correct black/green output
+// GC9A01 modules need color inversion on for correct output.
 constexpr bool kDisplayInvert = true;
-constexpr bool kDisplayRgbOrder = true;
 
 // --- Radar center defaults (overridden via WiFi setup portal) ---
 constexpr double kDefaultRadarLat = 52.3676;

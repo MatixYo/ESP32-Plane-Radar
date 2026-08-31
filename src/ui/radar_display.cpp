@@ -7,6 +7,7 @@
 #include <cstdlib>
 
 #include "config.h"
+#include "hardware/board.h"
 #include "hardware/display.h"
 #include "hardware/display_font.h"
 #include "services/adsb_client.h"
@@ -178,7 +179,7 @@ void initPalette() {
   radar::kColorLabel = tft.color565(255, 255, 255);
   radar::kColorCenter = tft.color565(255, 255, 255);
   // GC9A01 BGR panel: swap R/B in color565 so logical red renders red on screen.
-  if (config::kDisplayRgbOrder) {
+  if (hardware::board::activePins().rgb_order) {
     radar::kColorAircraft =
         tft.color565(radar::kAircraftB, radar::kAircraftG, radar::kAircraftR);
   } else {
