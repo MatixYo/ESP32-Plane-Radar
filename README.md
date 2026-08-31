@@ -90,6 +90,16 @@ As range decreases (or aircraft approach), targets move inward; beyond-ring dots
 - Poll interval: `kAdsbFetchIntervalMs` (5 s) in `config.h`
 - Ground aircraft hidden by default (`kAdsbShowGroundAircraft`)
 
+#### API response compatibility
+
+In August 2026, ADS-B.fi responses began arriving with HTTP/1.1 chunked
+transfer framing. The ESP32 Arduino `HTTPClient::getStream()` interface exposes
+that framing to its consumer, causing ArduinoJson to interpret the first chunk
+size as the complete response and display no aircraft. The client requests an
+HTTP/1.0 connection-close response to keep direct, filtered JSON streaming
+without buffering the full response in the ESP32's limited RAM. See upstream
+[issue #82](https://github.com/MatixYo/ESP32-Plane-Radar/issues/82).
+
 ## Configuration
 
 Edit **`include/config.h`** for hardware and behavior:

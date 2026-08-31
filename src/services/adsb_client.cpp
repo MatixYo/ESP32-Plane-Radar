@@ -201,6 +201,9 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   client.setInsecure();
 
   HTTPClient http;
+  // getStream() exposes HTTP/1.1 chunk markers. Request a connection-close
+  // body so ArduinoJson receives only JSON without buffering the full reply.
+  http.useHTTP10(true);
   if (!http.begin(client, url)) {
     Serial.println("adsb: http.begin failed");
     return false;
