@@ -23,31 +23,28 @@ constexpr unsigned long kWifiDownGraceMs = 4000;
 /** Minimum interval between background reconnect tries. */
 constexpr unsigned long kWifiReconnectIntervalMs = 15000;
 
-// --- BOOT button (ESP32-S3 Mini, active LOW) ---
-// GPIO0 and EN are unavailable on the S3 Mini; use GPIO3 instead.
-// Wire a momentary switch between GPIO3 and GND.
-constexpr gpio_num_t kBootPin = GPIO_NUM_0;
+// --- BOOT button (ESP32-C3 Super Mini, active LOW) ---
+constexpr gpio_num_t kBootPin = GPIO_NUM_9;
 constexpr unsigned long kBootResetHoldMs = 3000UL;
 /** Ignore BOOT taps shorter than this (debounce). */
 constexpr unsigned long kBootTapMinMs = 40UL;
 
 // --- Display: GC9A01 1.28" round 240×240 (SPI) ---
-// GPIO0 is unavailable on the S3 Mini, so RST is set to -1 (not connected /
-// tied to 3.3 V on the display module). The GC9A01 initialises fine via
-// software; hardware reset is optional.
-constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_8;   // RST unused — tie to 3.3 V or leave NC
-constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_10;
-constexpr gpio_num_t kDisplayPinDc = GPIO_NUM_9;
-constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_11;  // display SDA (FSPI MOSI)
-constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_12;  // display SCL (FSPI SCLK)
+
+
+constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_4;
+constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_5;
+constexpr gpio_num_t kDisplayPinDc = GPIO_NUM_6;
+constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_7;  // display SDA
+constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_8;  // display SCL
 
 constexpr int kDisplayWidth = 240;
 constexpr int kDisplayHeight = 240;
 
-constexpr uint32_t kDisplaySpiWriteHz = 40000000;
+constexpr uint32_t kDisplaySpiWriteHz = 20000000;
 // GC9A01 modules often need invert + BGR for correct black/green output
 constexpr bool kDisplayInvert = true;
-constexpr bool kDisplayRgbOrder = false;
+constexpr bool kDisplayRgbOrder = true;
 
 // --- Radar center defaults (overridden via WiFi setup portal) ---
 constexpr double kDefaultRadarLat = 52.3676;
