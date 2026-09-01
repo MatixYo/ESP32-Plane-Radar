@@ -2,6 +2,8 @@
 
 #include <cstddef>
 
+#include "data/airlines.h"
+
 namespace services::adsb {
 
 struct Aircraft {
@@ -10,9 +12,12 @@ struct Aircraft {
   float nose_deg;
   float track_deg;
   float gs_knots;
-  char callsign[9];
-  char type[5];
+  char callsign[9];  // flight/callsign, e.g. "BAW123"
+  char type[5];      // aircraft type code, e.g. "A320"
   char alt[12];
+  // Resolved airline (nullptr if the callsign is not a known airline flight).
+  // Provides the IATA acronym, full name, and friendly short name.
+  const data::airlines::Airline* airline;
 };
 
 constexpr size_t kMaxAircraft = 64;
