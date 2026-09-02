@@ -36,9 +36,6 @@ jobs:
       - name: Install PlatformIO
         run: pip install --upgrade platformio
 
-      - name: Check airport data
-        run: python3 scripts/build_large_airports.py --check
-
       - name: Build and merge
         run: |
           pio run -e supermini

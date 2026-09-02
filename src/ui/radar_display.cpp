@@ -18,7 +18,6 @@
 #include "ui/radar_theme.h"
 #include "ui/runway_overlay.h"
 
-namespace lgfx_fonts = lgfx::v1::fonts;
 
 namespace ui {
 namespace radar {
@@ -45,9 +44,9 @@ bool s_scale_use_vlw = false;
 float s_cardinal_vlw_size = 0.56f;
 float s_scale_vlw_size = 0.50f;
 float s_tag_vlw_size = 0.56f;
-const lgfx::GFXfont* s_cardinal_gfx = &lgfx_fonts::FreeSansBold12pt7b;
-const lgfx::GFXfont* s_scale_gfx = &lgfx_fonts::FreeSansBold9pt7b;
-const lgfx::GFXfont* s_tag_gfx = &lgfx_fonts::FreeSansBold12pt7b;
+const lgfx::GFXfont* s_cardinal_gfx = &fonts::FreeSansBold12pt7b;
+const lgfx::GFXfont* s_scale_gfx = &fonts::FreeSansBold9pt7b;
+const lgfx::GFXfont* s_tag_gfx = &fonts::FreeSansBold12pt7b;
 
 bool s_tag_label_metrics_ready = false;
 bool s_tag_use_vlw = false;
@@ -128,16 +127,16 @@ void initLabelMetrics() {
     s_scale_use_vlw = true;
     s_scale_vlw_size = findVlwSizeForHeight(scale_target);
   } else {
-    const lgfx::GFXfont* cardinal_candidates[] = {&lgfx_fonts::FreeSansBold12pt7b,
-                                                  &lgfx_fonts::FreeSansBold9pt7b};
+    const lgfx::GFXfont* cardinal_candidates[] = {&fonts::FreeSansBold12pt7b,
+                                                  &fonts::FreeSansBold9pt7b};
     s_cardinal_gfx =
         pickGfxFontClosest(cardinal_target, cardinal_candidates, 2);
     s_cardinal_use_vlw = false;
 
     const int cardinal_h = measureGfxHeight(*s_cardinal_gfx);
     const int scale_target = cardinal_h - radar::kScaleBelowCardinalPx;
-    const lgfx::GFXfont* scale_candidates[] = {&lgfx_fonts::FreeSansBold9pt7b,
-                                               &lgfx_fonts::FreeSansBold12pt7b};
+    const lgfx::GFXfont* scale_candidates[] = {&fonts::FreeSansBold9pt7b,
+                                               &fonts::FreeSansBold12pt7b};
     s_scale_gfx = pickGfxFontClosest(scale_target, scale_candidates, 2);
     s_scale_use_vlw = false;
   }
@@ -170,8 +169,8 @@ void initTagLabelMetrics() {
     s_tag_use_vlw = true;
     s_tag_vlw_size = findVlwSizeForHeight(target);
   } else {
-    const lgfx::GFXfont* tag_candidates[] = {&lgfx_fonts::FreeSansBold12pt7b,
-                                               &lgfx_fonts::FreeSansBold9pt7b};
+    const lgfx::GFXfont* tag_candidates[] = {&fonts::FreeSansBold12pt7b,
+                                               &fonts::FreeSansBold9pt7b};
     s_tag_gfx = pickGfxFontClosest(target, tag_candidates, 2);
     s_tag_use_vlw = false;
   }
@@ -205,11 +204,16 @@ void initPalette() {
 }
 
 constexpr float kKmPerDeg = 111.0f;
+constexpr float kDegToRad = 3.14159265f / 180.0f;
 
 void offsetKmFromCenter(float lat, float lon, float* dx_km, float* dy_km,
                         float* dist_km) {
-  *dx_km =
-      static_cast<float>(lon - services::location::lon()) * kKmPerDeg;
+  // Longitude degrees shrink toward the poles; scale by cos(latitude) so
+  // east-west distance isn't overstated away from the equator.
+  const float center_lat_rad =
+      static_cast<float>(services::location::lat()) * kDegToRad;
+  *dx_km = static_cast<float>(lon - services::location::lon()) * kKmPerDeg *
+           cosf(center_lat_rad);
   *dy_km =
       static_cast<float>(lat - services::location::lat()) * kKmPerDeg;
   *dist_km = sqrtf((*dx_km) * (*dx_km) + (*dy_km) * (*dy_km));

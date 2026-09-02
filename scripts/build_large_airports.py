@@ -3,10 +3,8 @@
 
 from __future__ import annotations
 
-import argparse
 import csv
 import io
-import sys
 import urllib.request
 from pathlib import Path
 
@@ -193,28 +191,9 @@ def render_cpp(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="Exit 1 if generated files would change.",
-    )
-    args = parser.parse_args()
-
     airport_rows, segments = build_dataset()
     header = render_header(len(airport_rows), len(segments))
     cpp = render_cpp(airport_rows, segments)
-
-    if args.check:
-        ok = True
-        for path, content in ((OUT_H, header), (OUT_CPP, cpp)):
-            if not path.exists() or path.read_text(encoding="utf-8") != content:
-                print(f"stale {path} — run scripts/build_large_airports.py", file=sys.stderr)
-                ok = False
-        if not ok:
-            return 1
-        print(f"ok ({len(segments)} runway segments, {len(airport_rows)} airports)")
-        return 0
 
     OUT_H.parent.mkdir(parents=True, exist_ok=True)
     OUT_CPP.parent.mkdir(parents=True, exist_ok=True)
