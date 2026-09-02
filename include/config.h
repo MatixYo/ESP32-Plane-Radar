@@ -6,6 +6,12 @@
 
 namespace config {
 
+#if defined(BOARD_ONX2432G028)
+constexpr bool kBoardOnx2432g028 = true;
+#else
+constexpr bool kBoardOnx2432g028 = false;
+#endif
+
 // --- Wi-Fi portal ---
 constexpr char kPortalApName[] = "PlaneRadar-Setup";
 constexpr char kPortalIp[] = "192.168.4.1";
@@ -23,26 +29,45 @@ constexpr unsigned long kWifiDownGraceMs = 4000;
 /** Minimum interval between background reconnect tries. */
 constexpr unsigned long kWifiReconnectIntervalMs = 15000;
 
-// --- BOOT button (ESP32-C3 Super Mini, active LOW) ---
-constexpr gpio_num_t kBootPin = GPIO_NUM_9;
+// --- User input (active LOW when present) ---
+constexpr bool kHasBootButton = true;
+constexpr bool kBootTapChangesRange = true;
+constexpr gpio_num_t kBootPin =
+    kBoardOnx2432g028 ? GPIO_NUM_0 : GPIO_NUM_9;
 constexpr unsigned long kBootResetHoldMs = 3000UL;
 /** Ignore BOOT taps shorter than this (debounce). */
 constexpr unsigned long kBootTapMinMs = 40UL;
 
-// --- Display: GC9A01 1.28" round 240×240 (SPI) ---
-constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_0;
-constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_1;
-constexpr gpio_num_t kDisplayPinDc = GPIO_NUM_10;
-constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_3;  // display SDA
-constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_4;  // display SCL
+// --- Display ---
+constexpr gpio_num_t kDisplayPinRst =
+    kBoardOnx2432g028 ? GPIO_NUM_NC : GPIO_NUM_0;
+constexpr gpio_num_t kDisplayPinCs =
+    kBoardOnx2432g028 ? GPIO_NUM_2 : GPIO_NUM_1;
+constexpr gpio_num_t kDisplayPinDc =
+    kBoardOnx2432g028 ? GPIO_NUM_3 : GPIO_NUM_10;
+constexpr gpio_num_t kDisplayPinMosi =
+    kBoardOnx2432g028 ? GPIO_NUM_1 : GPIO_NUM_3;
+constexpr gpio_num_t kDisplayPinSclk =
+    kBoardOnx2432g028 ? GPIO_NUM_5 : GPIO_NUM_4;
+constexpr gpio_num_t kDisplayPinBl =
+    kBoardOnx2432g028 ? GPIO_NUM_6 : GPIO_NUM_NC;
 
-constexpr int kDisplayWidth = 240;
-constexpr int kDisplayHeight = 240;
+constexpr int kDisplayWidth = kBoardOnx2432g028 ? 240 : 240;
+constexpr int kDisplayHeight = kBoardOnx2432g028 ? 320 : 240;
 
-constexpr uint32_t kDisplaySpiWriteHz = 40000000;
-// GC9A01 modules often need invert + BGR for correct black/green output
-constexpr bool kDisplayInvert = true;
+constexpr int kRadarViewportSize = kDisplayWidth < 240 ? kDisplayWidth : 240;
+constexpr int kRadarViewportX = (kDisplayWidth - kRadarViewportSize) / 2;
+constexpr int kRadarViewportY = kBoardOnx2432g028
+                                  ? 0
+                                  : (kDisplayHeight - kRadarViewportSize) / 2;
+constexpr bool kRadarInfoPanelEnabled = kBoardOnx2432g028;
+constexpr int kRadarInfoPanelY = 246;
+
+constexpr uint32_t kDisplaySpiWriteHz =
+    kBoardOnx2432g028 ? 40000000 : 40000000;
+constexpr bool kDisplayInvert = kBoardOnx2432g028 ? false : true;
 constexpr bool kDisplayRgbOrder = true;
+constexpr uint8_t kDisplayRotation = 0;
 
 // --- Radar center defaults (overridden via WiFi setup portal) ---
 constexpr double kDefaultRadarLat = 52.3676;
