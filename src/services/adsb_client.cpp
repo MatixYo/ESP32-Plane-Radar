@@ -215,6 +215,11 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   url += "/dist/";
   url += String(dist_nm, 1);
 
+  if (ESP.getFreeHeap() < 50000) {
+    Serial.printf("adsb: heap too low (%u), skipping\n", ESP.getFreeHeap());
+    return false;
+  }
+
   WiFiClientSecure client;
   client.setInsecure();
 
@@ -233,20 +238,41 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     return false;
   }
 
-  String payload;
-  if (!readResponseBodyWithPoll(http, payload)) {
-    Serial.println("adsb: empty response");
+  WiFiClient* stream = http.getStreamPtr();
+  if (!stream) { 
+    http.end(); 
+    return false; 
+  }
+  
+  static JsonDocument filter;
+  static bool filter_built = false;
+  if (!filter_built) {
+    JsonObject f = filter["ac"][0].to<JsonObject>();
+    f["lat"]          = true;
+    f["lon"]          = true;
+    f["flight"]       = true;
+    f["hex"]          = true;
+    f["t"]            = true;
+    f["alt_baro"]     = true;
+    f["alt_geom"]     = true;
+    f["true_heading"] = true;
+    f["mag_heading"]  = true;
+    f["track"]        = true;
+    f["dir"]          = true;
+    f["gs"]           = true;
+    f["tas"]          = true;
+    f["ias"]          = true;
+    filter_built = true;
+  }
+
+  JsonDocument doc;
+  const DeserializationError err = deserializeJson(doc, *stream, DeserializationOption::Filter(filter));
+  if (err) {
+    Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
     http.end();
     return false;
   }
   http.end();
-
-  JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, payload);
-  if (err) {
-    Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
-    return false;
-  }
 
   JsonArray ac = doc["ac"].as<JsonArray>();
   if (ac.isNull()) {
