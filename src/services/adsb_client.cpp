@@ -8,6 +8,8 @@
 #include <cstring>
 
 #include "config.h"
+#include "services/route_fetcher.h"
+#include "ui/radar_range.h"
 
 namespace services::adsb {
 
@@ -47,7 +49,7 @@ int performGetWithPoll(HTTPClient& http) {
 }
 
 bool readResponseBodyWithPoll(HTTPClient& http, String& payload) {
-  WiFiClient* stream = http.getStreamPtr();
+  auto* stream = http.getStreamPtr();
   if (stream == nullptr) {
     return false;
   }
@@ -183,7 +185,25 @@ void formatAltitudeTag(const JsonObject& plane, char* out, size_t out_len) {
   float alt = 0.0f;
   if (readJsonFloat(plane, "alt_baro", &alt) ||
       readJsonFloat(plane, "alt_geom", &alt)) {
-    snprintf(out, out_len, "%d ft", static_cast<int>(lroundf(alt)));
+    if (ui::radar::useMiles()) {
+      snprintf(out, out_len, "%d ft", static_cast<int>(lroundf(alt)));
+    } else {
+      snprintf(out, out_len, "%d m", static_cast<int>(lroundf(alt * 0.3048f)));
+    }
+  }
+}
+
+void formatSpeedTag(const JsonObject& plane, char* out, size_t out_len) {
+  out[0] = '\0';
+  if (out_len == 0) return;
+
+  float gs = pickGroundSpeed(plane);
+  if (gs > 0.0f) {
+    if (ui::radar::useMiles()) {
+      snprintf(out, out_len, "%d kts", static_cast<int>(lroundf(gs)));
+    } else {
+      snprintf(out, out_len, "%d km/h", static_cast<int>(lroundf(gs * 1.852f)));
+    }
   }
 }
 
@@ -195,6 +215,13 @@ void fillTagFields(Aircraft* ac, const JsonObject& plane) {
 
   copyJsonStringTrimmed(plane, "t", ac->type, sizeof(ac->type));
   formatAltitudeTag(plane, ac->alt, sizeof(ac->alt));
+  formatSpeedTag(plane, ac->speed, sizeof(ac->speed));
+
+  if (ac->callsign[0] != '\0') {
+    services::route::getRoute(ac->callsign, ac->route, sizeof(ac->route));
+  } else {
+    ac->route[0] = '\0';
+  }
 }
 
 }  // namespace

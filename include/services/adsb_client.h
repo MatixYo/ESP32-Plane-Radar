@@ -13,6 +13,8 @@ struct Aircraft {
   char callsign[9];
   char type[5];
   char alt[12];
+  char speed[12];
+  char route[48]; // e.g., "Denver - New York"
 };
 
 constexpr size_t kMaxAircraft = 64;

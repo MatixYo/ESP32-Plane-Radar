@@ -9,6 +9,8 @@
 #include "hardware/display.h"
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
+#include "services/route_fetcher.h"
+#include "services/web_server.h"
 #include "services/wifi_setup.h"
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
@@ -74,10 +76,12 @@ void setup() {
     statusScreenPortal();
   }
   services::location::init();
+  services::route::init();
   ui::radar::rangeInit();
   services::adsb::setPollFn(wifiLoop);
 
   if (wifiSetupConnect()) {
+    services::web::init();
     showRadarIfConnected();
   }
 }
@@ -85,6 +89,7 @@ void setup() {
 void loop() {
   handleBootButton();
   wifiLoop();
+  services::web::handleClient();
 
   if (WiFi.status() != WL_CONNECTED) {
     if (g_radar_visible) {

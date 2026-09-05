@@ -15,6 +15,7 @@ constexpr char kPrefsNamespace[] = "planeradar";
 constexpr char kPrefsRangeKey[] = "rangeIdx";
 constexpr char kPrefsMilesKey[] = "useMiles";
 constexpr char kPrefsRunwaysKey[] = "showRwys";
+constexpr char kPrefsAirportModeKey[] = "apMode";
 constexpr uint8_t kDefaultRangeIndex = 1;  // 10 km ring
 constexpr float kKmPerMile = 1.609344f;
 
@@ -22,6 +23,7 @@ Preferences s_prefs;
 uint8_t s_range_index = kDefaultRangeIndex;
 bool s_use_miles = false;
 bool s_show_runways = true;
+AirportDataMode s_airport_mode = AirportDataMode::NAMES;
 
 void saveRangeIndex() {
   if (!s_prefs.begin(kPrefsNamespace, false)) {
@@ -44,6 +46,14 @@ void saveShowRunways() {
     return;
   }
   s_prefs.putBool(kPrefsRunwaysKey, s_show_runways);
+  s_prefs.end();
+}
+
+void saveAirportDataMode() {
+  if (!s_prefs.begin(kPrefsNamespace, false)) {
+    return;
+  }
+  s_prefs.putUChar(kPrefsAirportModeKey, static_cast<uint8_t>(s_airport_mode));
   s_prefs.end();
 }
 
@@ -70,6 +80,12 @@ void rangeInit() {
       (saved < kRangePresetCount) ? saved : kDefaultRangeIndex;
   s_use_miles = s_prefs.getBool(kPrefsMilesKey, false);
   s_show_runways = s_prefs.getBool(kPrefsRunwaysKey, true);
+  
+  const uint8_t mode = s_prefs.getUChar(kPrefsAirportModeKey, static_cast<uint8_t>(AirportDataMode::NAMES));
+  if (mode <= static_cast<uint8_t>(AirportDataMode::NAMES)) {
+    s_airport_mode = static_cast<AirportDataMode>(mode);
+  }
+
   s_prefs.end();
 }
 
@@ -78,9 +94,23 @@ void rangeNext() {
   saveRangeIndex();
 }
 
+void setRangeIndex(uint8_t index) {
+  if (index < kRangePresetCount) {
+    s_range_index = index;
+    saveRangeIndex();
+  }
+}
+
 const RangePreset& rangeCurrent() { return kRangePresets[s_range_index]; }
 
 uint8_t rangeIndex() { return s_range_index; }
+
+AirportDataMode getAirportDataMode() { return s_airport_mode; }
+
+void setAirportDataMode(AirportDataMode mode) {
+  s_airport_mode = mode;
+  saveAirportDataMode();
+}
 
 float fetchRadiusKm() {
   const float outer_km = rangeCurrent().outer_km;
@@ -90,6 +120,11 @@ float fetchRadiusKm() {
 }
 
 bool useMiles() { return s_use_miles; }
+
+void setUseMiles(bool use_miles) {
+  s_use_miles = use_miles;
+  saveUseMiles();
+}
 
 bool showRunways() { return s_show_runways; }
 
