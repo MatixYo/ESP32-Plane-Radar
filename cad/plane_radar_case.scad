@@ -149,27 +149,21 @@ module front_enclosure() {
                 inner_cavity();
             }
 
-            // 4 Corner Columns + continuous top/bottom seating rim (clipped within shell)
+            // 4 Corner Columns for rear cover screws (solid pillars clipped within shell)
             intersection() {
                 outer_shell();
                 union() {
                     // Bottom-Left & Bottom-Right Corners
                     translate([0, 0, 0])
-                        cube([wall + col_size, col_rear_y, wall + col_size + 2]);
+                        cube([wall + col_size, col_rear_y, wall + col_size]);
                     translate([case_w - wall - col_size, 0, 0])
-                        cube([wall + col_size, col_rear_y, wall + col_size + 2]);
+                        cube([wall + col_size, col_rear_y, wall + col_size]);
 
                     // Top-Left & Top-Right Corners
-                    translate([0, 0, case_h - wall - col_size - 2])
-                        cube([wall + col_size, col_rear_y, wall + col_size + 2]);
-                    translate([case_w - wall - col_size, 0, case_h - wall - col_size - 2])
-                        cube([wall + col_size, col_rear_y, wall + col_size + 2]);
-
-                    // Continuous top & bottom anti-warp reinforcement shelves at rear rim
-                    translate([wall, col_rear_y - 2.0, case_h - wall - 3.0])
-                        cube([case_w - 2 * wall, 2.0, 3.0]);
-                    translate([wall, col_rear_y - 2.0, wall])
-                        cube([case_w - 2 * wall, 2.0, 3.0]);
+                    translate([0, 0, case_h - wall - col_size])
+                        cube([wall + col_size, col_rear_y, wall + col_size]);
+                    translate([case_w - wall - col_size, 0, case_h - wall - col_size])
+                        cube([wall + col_size, col_rear_y, wall + col_size]);
                 }
             }
 
@@ -321,7 +315,7 @@ module back_cover() {
     cover_w         = case_w - 2 * wall - 0.4;
     cover_h         = case_h - 2 * wall - 0.4;
     cover_corner_r  = 1.0;   // Small 1.0mm corner radius to fully fill inner cavity corners (no gap)
-    col_size        = 7.6;
+    col_size        = 8.0;
 
     difference() {
         // Flat rectangular plate with small 1.0mm rounded corners
