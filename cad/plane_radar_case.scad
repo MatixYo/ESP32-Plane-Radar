@@ -85,49 +85,45 @@ module on_front_face(s_pos) {
         rotate([90 - tilt_deg, 0, 0])
             children();
 }
-
-// 3D Solid Outer Shell with 18-degree tilted front and vertical back
+// 3D Solid Outer Shell with 18-degree tilted front and crisp vertical/flat rear rim
 module outer_shell() {
     hull() {
-        // Bottom 4 rounded corners
+        // Front 4 rounded corners (spheres for smooth 3D rounded front face & 18° tilt)
         translate([corner_r, corner_r, corner_r])
             sphere(r = corner_r);
         translate([case_w - corner_r, corner_r, corner_r])
             sphere(r = corner_r);
-        translate([corner_r, case_base_d - corner_r, corner_r])
-            sphere(r = corner_r);
-        translate([case_w - corner_r, case_base_d - corner_r, corner_r])
-            sphere(r = corner_r);
-
-        // Top 4 rounded corners
         translate([corner_r, shift_y + corner_r, case_h - corner_r])
             sphere(r = corner_r);
         translate([case_w - corner_r, shift_y + corner_r, case_h - corner_r])
             sphere(r = corner_r);
-        translate([corner_r, case_base_d - corner_r, case_h - corner_r])
-            sphere(r = corner_r);
-        translate([case_w - corner_r, case_base_d - corner_r, case_h - corner_r])
-            sphere(r = corner_r);
+
+        // Rear vertical cylinders (keeps outer side corners rounded R=4mm, but ensures
+        // the rear opening plane Y = case_base_d and top/bottom planes are 100% crisp and flat)
+        translate([corner_r, case_base_d - corner_r, 0])
+            cylinder(r = corner_r, h = case_h);
+        translate([case_w - corner_r, case_base_d - corner_r, 0])
+            cylinder(r = corner_r, h = case_h);
     }
 }
 
 // Inner Cavity subtracted from the rear
 module inner_cavity() {
     hull() {
-        // Bottom inner corners
+        // Front inner corners (matching the 18° tilt)
         translate([wall + corner_r/2, wall + corner_r/2, wall])
             cylinder(r = corner_r/2, h = 1);
         translate([case_w - wall - corner_r/2, wall + corner_r/2, wall])
             cylinder(r = corner_r/2, h = 1);
-        translate([wall + corner_r/2, case_base_d + 10, wall])
-            cylinder(r = corner_r/2, h = 1);
-        translate([case_w - wall - corner_r/2, case_base_d + 10, wall])
-            cylinder(r = corner_r/2, h = 1);
-
-        // Top inner corners
         translate([wall + corner_r/2, shift_y + wall + corner_r/2, case_h - wall])
             cylinder(r = corner_r/2, h = 1);
         translate([case_w - wall - corner_r/2, shift_y + wall + corner_r/2, case_h - wall])
+            cylinder(r = corner_r/2, h = 1);
+
+        // Rear inner opening (extends straight back through Y = case_base_d + 10)
+        translate([wall + corner_r/2, case_base_d + 10, wall])
+            cylinder(r = corner_r/2, h = 1);
+        translate([case_w - wall - corner_r/2, case_base_d + 10, wall])
             cylinder(r = corner_r/2, h = 1);
         translate([wall + corner_r/2, case_base_d + 10, case_h - wall])
             cylinder(r = corner_r/2, h = 1);
@@ -140,7 +136,7 @@ module front_enclosure() {
     col_size        = 8.0;   // Width & height of square corner column
     hole_depth      = 14.0;  // Screw hole depth from rear plate
     cover_t         = 1.6;   // Rear cover thickness
-    col_rear_y      = case_base_d - cover_t - 0.6; // Recessed deeper so backplate sits perfectly flush
+    col_rear_y      = case_base_d - cover_t - 0.4; // Recessed by cover_t + 0.4mm for flush seating
 
     difference() {
         // ============================================================
@@ -153,7 +149,7 @@ module front_enclosure() {
                 inner_cavity();
             }
 
-            // 4 Corner Columns (clipped within shell boundaries)
+            // 4 Corner Columns + continuous top/bottom seating rim (clipped within shell)
             intersection() {
                 outer_shell();
                 union() {
@@ -168,6 +164,12 @@ module front_enclosure() {
                         cube([wall + col_size, col_rear_y, wall + col_size + 2]);
                     translate([case_w - wall - col_size, 0, case_h - wall - col_size - 2])
                         cube([wall + col_size, col_rear_y, wall + col_size + 2]);
+
+                    // Continuous top & bottom anti-warp reinforcement shelves at rear rim
+                    translate([wall, col_rear_y - 2.0, case_h - wall - 3.0])
+                        cube([case_w - 2 * wall, 2.0, 3.0]);
+                    translate([wall, col_rear_y - 2.0, wall])
+                        cube([case_w - 2 * wall, 2.0, 3.0]);
                 }
             }
 
