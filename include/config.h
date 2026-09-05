@@ -29,20 +29,32 @@ constexpr unsigned long kBootResetHoldMs = 3000UL;
 /** Ignore BOOT taps shorter than this (debounce). */
 constexpr unsigned long kBootTapMinMs = 40UL;
 
-// --- Display: GC9A01 1.28" round 240×240 (SPI) ---
+// --- Rotary Encoder (EC11 / KY-040) ---
+constexpr gpio_num_t kEncoderPinClk = GPIO_NUM_5;
+constexpr gpio_num_t kEncoderPinDt  = GPIO_NUM_6;
+constexpr gpio_num_t kEncoderPinSw  = GPIO_NUM_7;
+constexpr gpio_num_t kEncoderPinGnd = GPIO_NUM_8;     // Virtual GND (beside GPIO 7)
+constexpr gpio_num_t kEncoderPinVcc = GPIO_NUM_2;     // Virtual 3.3V (VCC)
+
+// --- NTP Timezone (Central Europe / Prague) ---
+constexpr char kNtpTimezone[] = "CET-1CEST,M3.5.0,M10.5.0/3";
+constexpr char kNtpServer1[]  = "pool.ntp.org";
+constexpr char kNtpServer2[]  = "time.google.com";
+
+// --- Display: GC9B72 2.1" round 360×360 (SPI) ---
 constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_0;
 constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_1;
 constexpr gpio_num_t kDisplayPinDc = GPIO_NUM_10;
 constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_3;  // display SDA
 constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_4;  // display SCL
 
-constexpr int kDisplayWidth = 240;
-constexpr int kDisplayHeight = 240;
+constexpr int kDisplayWidth = 360;
+constexpr int kDisplayHeight = 360;
 
 constexpr uint32_t kDisplaySpiWriteHz = 40000000;
-// GC9A01 modules often need invert + BGR for correct black/green output
-constexpr bool kDisplayInvert = true;
-constexpr bool kDisplayRgbOrder = true;
+// GC9B72 display configuration
+constexpr bool kDisplayInvert = false;
+constexpr bool kDisplayRgbOrder = false;
 
 // --- Radar center defaults (overridden via WiFi setup portal) ---
 constexpr double kDefaultRadarLat = 52.3676;

@@ -194,6 +194,17 @@ void fillTagFields(Aircraft* ac, const JsonObject& plane) {
   }
 
   copyJsonStringTrimmed(plane, "t", ac->type, sizeof(ac->type));
+  copyJsonStringTrimmed(plane, "hex", ac->hex, sizeof(ac->hex));
+  copyJsonStringTrimmed(plane, "r", ac->reg, sizeof(ac->reg));
+  copyJsonStringTrimmed(plane, "desc", ac->desc, sizeof(ac->desc));
+  copyJsonStringTrimmed(plane, "squawk", ac->squawk, sizeof(ac->squawk));
+
+  ac->on_ground = isOnGround(plane);
+  ac->baro_rate_fpm = 0.0f;
+  if (!readJsonFloat(plane, "baro_rate", &ac->baro_rate_fpm)) {
+    readJsonFloat(plane, "geom_rate", &ac->baro_rate_fpm);
+  }
+
   formatAltitudeTag(plane, ac->alt, sizeof(ac->alt));
 }
 
@@ -254,6 +265,10 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     return true;
   }
 
+  constexpr float kKmPerDeg = 111.0f;
+  constexpr float kDegToRad = 3.14159265f / 180.0f;
+  const float center_lat_rad = static_cast<float>(center_lat) * kDegToRad;
+
   size_t n = 0;
   for (JsonObject plane : ac) {
     if (n >= kMaxAircraft) {
@@ -272,11 +287,34 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     s_aircraft[n].track_deg = pickTrackHeading(plane);
     s_aircraft[n].gs_knots = pickGroundSpeed(plane);
     fillTagFields(&s_aircraft[n], plane);
+
+    // Calculate distance and bearing from radar center
+    const float dx = static_cast<float>(s_aircraft[n].lon - center_lon) *
+                     kKmPerDeg * cosf(center_lat_rad);
+    const float dy = static_cast<float>(s_aircraft[n].lat - center_lat) * kKmPerDeg;
+    s_aircraft[n].dist_km = sqrtf(dx * dx + dy * dy);
+    float brg = atan2f(dx, dy) * 57.2957795f;
+    if (brg < 0.0f) {
+      brg += 360.0f;
+    }
+    s_aircraft[n].bearing_deg = brg;
+
     ++n;
   }
 
+  // Sort aircraft closest first
+  for (size_t i = 1; i < n; ++i) {
+    const Aircraft key = s_aircraft[i];
+    size_t j = i;
+    while (j > 0 && s_aircraft[j - 1].dist_km > key.dist_km) {
+      s_aircraft[j] = s_aircraft[j - 1];
+      --j;
+    }
+    s_aircraft[j] = key;
+  }
+
   s_aircraft_count = n;
-  Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
+  Serial.printf("adsb: %u aircraft (sorted closest first)\n", static_cast<unsigned>(n));
   return true;
 }
 
