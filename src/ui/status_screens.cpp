@@ -13,14 +13,14 @@
 
 namespace {
 
-constexpr int kLineGap = 6;
+constexpr int kLineGap = 8;
 const int kCenterX = config::kDisplayWidth / 2;
 const int kCenterY = config::kDisplayHeight / 2;
 
 constexpr int kSpinnerDotCount = 10;
-constexpr int kSpinnerRadius = 113;
-constexpr int kSpinnerDotRadius = 2;
-constexpr int kSpinnerEraseRadius = 4;
+constexpr int kSpinnerRadius = 170;
+constexpr int kSpinnerDotRadius = 3;
+constexpr int kSpinnerEraseRadius = 6;
 constexpr float kSpinnerStepDeg = 6.0f;
 
 struct SpinnerDot {
@@ -31,7 +31,7 @@ struct SpinnerDot {
 
 char s_connecting_ssid[33];
 char s_ssid_line[33];
-constexpr int kConnectingTextMaxWidthPx = 220;
+constexpr int kConnectingTextMaxWidthPx = 330;
 float s_spinner_angle_deg = -90.0f;
 SpinnerDot s_spinner_dots[kSpinnerDotCount];
 bool s_connecting_text_drawn = false;
