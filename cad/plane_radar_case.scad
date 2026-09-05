@@ -164,6 +164,10 @@ module front_enclosure() {
                         cube([wall + col_size, col_rear_y, wall + col_size]);
                     translate([case_w - wall - col_size, 0, case_h - wall - col_size])
                         cube([wall + col_size, col_rear_y, wall + col_size]);
+
+                    // Continuous bottom seating ledge at rear rim (sits directly on solid bottom floor, 100% support-free)
+                    translate([wall, col_rear_y - 2.0, wall])
+                        cube([case_w - 2 * wall, 2.0, 3.0]);
                 }
             }
 
