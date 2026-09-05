@@ -136,16 +136,11 @@ module inner_cavity() {
     }
 }
 
-// ====================================================================
-// Part 1: Front Enclosure (Single unified 100% 2-manifold boolean)
-// ====================================================================
 module front_enclosure() {
     col_size        = 8.0;   // Width & height of square corner column
     hole_depth      = 14.0;  // Screw hole depth from rear plate
-    disp_standoff_h = 2.0;   // Display support collar height
-    disp_collar_od  = 60.6;  // Collar outer diameter (matches 60mm PCB)
-    cover_t         = 2.4;   // Rear cover thickness (for recessed shelf)
-    col_rear_y      = case_base_d - cover_t;
+    cover_t         = 1.6;   // Rear cover thickness
+    col_rear_y      = case_base_d - cover_t - 0.6; // Recessed deeper so backplate sits perfectly flush
 
     difference() {
         // ============================================================
@@ -320,25 +315,26 @@ module test_bezel_swatch() {
 // Part 2: Rear Backplate Cover (Printable Flat on Bed)
 // ====================================================================
 module back_cover() {
-    cover_w = case_w - 2 * wall - 0.4;
-    cover_h = case_h - 2 * wall - 0.4;
-    cover_t = 2.4;
-    col_size = 7.6;
+    cover_t         = 1.6;   // 1.6mm thickness (sits flush within cavity without sticking out)
+    cover_w         = case_w - 2 * wall - 0.4;
+    cover_h         = case_h - 2 * wall - 0.4;
+    cover_corner_r  = 1.0;   // Small 1.0mm corner radius to fully fill inner cavity corners (no gap)
+    col_size        = 7.6;
 
     difference() {
-        // Flat rounded rectangular plate
+        // Flat rectangular plate with small 1.0mm rounded corners
         hull() {
-            translate([corner_r, corner_r, 0])
-                cylinder(r = corner_r, h = cover_t);
-            translate([cover_w - corner_r, corner_r, 0])
-                cylinder(r = corner_r, h = cover_t);
-            translate([cover_w - corner_r, cover_h - corner_r, 0])
-                cylinder(r = corner_r, h = cover_t);
-            translate([corner_r, cover_h - corner_r, 0])
-                cylinder(r = corner_r, h = cover_t);
+            translate([cover_corner_r, cover_corner_r, 0])
+                cylinder(r = cover_corner_r, h = cover_t);
+            translate([cover_w - cover_corner_r, cover_corner_r, 0])
+                cylinder(r = cover_corner_r, h = cover_t);
+            translate([cover_w - cover_corner_r, cover_h - cover_corner_r, 0])
+                cylinder(r = cover_corner_r, h = cover_t);
+            translate([cover_corner_r, cover_h - cover_corner_r, 0])
+                cylinder(r = cover_corner_r, h = cover_t);
         }
 
-        // 4 Corner Screw Holes (Countersunk for flush finish)
+        // 4 Corner Screw Holes (Direct through-holes for standard button/pan head screws)
         boss_inset_x = col_size / 2 - 0.2;
         boss_inset_y = col_size / 2 - 0.2;
 
@@ -346,9 +342,6 @@ module back_cover() {
             for (cy = [boss_inset_y, cover_h - boss_inset_y]) {
                 translate([cx, cy, -1])
                     cylinder(d = screw_hole_dia + 0.4, h = cover_t + 2);
-                // Beveled countersink
-                //translate([cx, cy, cover_t - 1.2])
-                    // cylinder(d1 = screw_hole_dia + 0.4, d2 = screw_hole_dia + 3.2, h = 1.3);
             }
         }
 
@@ -363,6 +356,7 @@ module back_cover() {
             cube([usbc_w, 8, cover_t + 2]);
     }
 }
+
 
 // ====================================================================
 // Render Output
