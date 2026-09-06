@@ -4,63 +4,90 @@
 
 namespace ui::radar {
 
-constexpr int kSize = 240;
-constexpr int kCenterX = kSize / 2;
-constexpr int kCenterY = kSize / 2;
+/**
+ * Radar layout.
+ *
+ * Lengths were chosen against a 240x240 panel and are scaled at runtime by
+ * initMetrics() to the panel actually fitted, so they are variables rather than
+ * constants — the same shape the colours below have always had. Values that are
+ * not lengths (counts, times, km, ratios) stay constexpr.
+ */
+
+/** The panel this layout was designed on; every scaled value is a ratio of it. */
+constexpr int kReferenceSize = 240;
+
+/**
+ * Recompute the layout for a panel of this size. Call once, after `tft.init()`
+ * and before anything draws. `panel_width`/`panel_height` come from
+ * `tft.width()` / `tft.height()` rather than from `config.h`, so a panel that
+ * reports a size different from the configured one still lays out correctly.
+ */
+void initMetrics(int panel_width, int panel_height);
+
+/** Scale actually applied, = min(width, height) / kReferenceSize. 1.0 on 240px. */
+extern float kScale;
+
+/** Square extent of the radar, = min(panel width, panel height). */
+extern int kSize;
+extern int kCenterX;
+extern int kCenterY;
 
 /** Outermost grid ring (inside edge labels). */
-constexpr int kGridOuterRadius = 107;
+extern int kGridOuterRadius;
 
 /** N: offset from top edge (top_center, negative = up). */
-constexpr int kCardinalNorthOffsetY = -1;
+extern int kCardinalNorthOffsetY;
 /** S: offset from bottom edge (bottom_center, positive = down). */
-constexpr int kCardinalSouthOffsetY = 3;
+extern int kCardinalSouthOffsetY;
 
 /** Gap between scale label right edge and outer ring on the east spoke (px). */
-constexpr int kScaleGapFromOuterRing = 6;
+extern int kScaleGapFromOuterRing;
 
 /** Target cap height (px) for N/S/E/W. */
-constexpr int kCardinalLabelHeightPx = 14;
+extern int kCardinalLabelHeightPx;
 /** Scale label is this many px shorter than cardinals. */
-constexpr int kScaleBelowCardinalPx = 3;
+extern int kScaleBelowCardinalPx;
 
+/** A count, not a length — the same four rings at any panel size. */
 constexpr int kRingCount = 4;
 
-/** Shared grid stroke: drawWideLine half-width (~2 px total); rings use the same px count. */
-constexpr float kGridStrokeHalfWidth = 1.0f;
+/** Shared grid stroke: drawWideLine half-width; rings use the same px count. */
+extern float kGridStrokeHalfWidth;
 
-constexpr int kCenterDotRadius = 2;
+extern int kCenterDotRadius;
 
 /** Filled aircraft symbol (nose triangle). */
-constexpr int kAircraftNoseLenPx = 8;
-constexpr int kAircraftTailLenPx = 3;
-constexpr int kAircraftTailHalfPx = 4;
+extern int kAircraftNoseLenPx;
+extern int kAircraftTailLenPx;
+extern int kAircraftTailHalfPx;
+
 /** Track vector: ground distance covered in this many seconds at current gs. */
 constexpr float kAircraftTrackHorizonSec = 60.0f;
-/** Minimum visible vector when gs > 0 (px). */
-constexpr int kAircraftSpeedLineMinPx = 2;
 /** Track line length uses this outer_km, not the active range preset. */
 constexpr float kAircraftTrackRefOuterKm = 13.3f;
-/** Shorter than full 60 s horizon at ref scale; ×1.5 length boost applied. */
+/** Shorter than full 60 s horizon at ref scale; x1.5 length boost applied. */
 constexpr float kAircraftTrackLengthScale = 1.5f / 5.0f;
-/** drawWideLine half-width for speed vectors (~2 px total). */
-constexpr float kAircraftTrackLineHalfWidth = 1.0f;
 
-constexpr float kRunwayLineWidthPx = 2.0f;
-constexpr float kRunwayLineHalfWidth = kRunwayLineWidthPx * 0.5f;
-constexpr int kRunwayLabelHeightPx = kCardinalLabelHeightPx;
-constexpr int kRunwayLabelGapPx = 3;
+/** Minimum visible vector when gs > 0 (px). */
+extern int kAircraftSpeedLineMinPx;
+/** drawWideLine half-width for speed vectors. */
+extern float kAircraftTrackLineHalfWidth;
+
+extern float kRunwayLineWidthPx;
+extern float kRunwayLineHalfWidth;
+extern int kRunwayLabelHeightPx;
+extern int kRunwayLabelGapPx;
+
 /** Gap from triangle edge to tag block (px). */
-constexpr int kAircraftLabelGapPx = 1;
+extern int kAircraftLabelGapPx;
 /** Keep symbol centroid inside outer ring by at least this inset (px). */
-constexpr int kAircraftInsideRingInsetPx =
-    kAircraftNoseLenPx + kAircraftTailHalfPx + 1;
+extern int kAircraftInsideRingInsetPx;
 
 /** Beyond-ring traffic: bearing cues on screen rim (correct direction, fixed radius). */
-constexpr int kBeyondRingDotRadiusPx = 4;
-constexpr int kBeyondRingScreenMarginPx = 2;
+extern int kBeyondRingDotRadiusPx;
+extern int kBeyondRingScreenMarginPx;
 /** Target cap height (px) for aircraft tags (bold, slightly above scale label). */
-constexpr int kAircraftTagLabelHeightPx = 13;
+extern int kAircraftTagLabelHeightPx;
 
 /** RGB565 palette targets (applied in initPalette). */
 constexpr uint8_t kBgR = 4;

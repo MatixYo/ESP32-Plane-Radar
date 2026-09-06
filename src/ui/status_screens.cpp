@@ -10,17 +10,51 @@
 #include "config.h"
 #include "hardware/display.h"
 #include "hardware/display_font.h"
+#include "ui/radar_theme.h"
 
 namespace {
 
-constexpr int kLineGap = 6;
-const int kCenterX = config::kDisplayWidth / 2;
-const int kCenterY = config::kDisplayHeight / 2;
+/**
+ * Laid out on the 240x240 reference panel, like the radar. Functions rather
+ * than constants because the panel size is only known once tft is initialised,
+ * which is when ui::radar::kScale is filled in.
+ */
+static inline int scaled(int reference_px) {
+  const int value =
+      static_cast<int>(std::lround(reference_px * ui::radar::kScale));
+  return (value < 1) ? 1 : value;
+}
 
+static inline int centerX() {
+  return tft.width() / 2;
+}
+
+static inline int centerY() {
+  return tft.height() / 2;
+}
+
+static inline int lineGap() {
+  return scaled(6);
+}
+
+static inline int spinnerRadius() {
+  return scaled(113);
+}
+
+static inline int spinnerDotRadius() {
+  return scaled(2);
+}
+
+static inline int spinnerEraseRadius() {
+  return scaled(4);
+}
+
+static inline int connectingTextMaxWidthPx() {
+  return scaled(220);
+}
+
+/** A count and an angle — neither moves with the panel. */
 constexpr int kSpinnerDotCount = 10;
-constexpr int kSpinnerRadius = 113;
-constexpr int kSpinnerDotRadius = 2;
-constexpr int kSpinnerEraseRadius = 4;
 constexpr float kSpinnerStepDeg = 6.0f;
 
 struct SpinnerDot {
@@ -31,7 +65,6 @@ struct SpinnerDot {
 
 char s_connecting_ssid[33];
 char s_ssid_line[33];
-constexpr int kConnectingTextMaxWidthPx = 220;
 float s_spinner_angle_deg = -90.0f;
 SpinnerDot s_spinner_dots[kSpinnerDotCount];
 bool s_connecting_text_drawn = false;
@@ -62,7 +95,10 @@ int lineHeightVlw(float size) {
 
 void applyLineStyle(const TextLine& line) {
   if (displayFontIsSmooth()) {
-    displayFontSetSmoothSize(tft, line.vlw_size);
+    // VLW sizes are a multiple of the font's point size, so scaling them keeps
+    // text the same fraction of the screen on a larger panel. The bitmap
+    // fallback below cannot scale continuously and is left alone.
+    displayFontSetSmoothSize(tft, line.vlw_size * ui::radar::kScale);
   } else {
     displayFontSetBitmap(tft, line.gfx_font);
   }
@@ -81,18 +117,18 @@ void drawTextBlock(uint16_t bg, uint16_t fg, const TextLine* lines, size_t count
       total_h += lineHeightGfx(lines[i].gfx_font);
     }
     if (i + 1 < count) {
-      total_h += kLineGap;
+      total_h += lineGap();
     }
   }
 
-  int y = (config::kDisplayHeight - total_h) / 2;
+  int y = (tft.height() - total_h) / 2;
   for (size_t i = 0; i < count; ++i) {
     applyLineStyle(lines[i]);
     const int h =
         displayFontIsSmooth() ? lineHeightVlw(lines[i].vlw_size)
                               : lineHeightGfx(lines[i].gfx_font);
-    tft.drawString(lines[i].text, kCenterX, y + h / 2);
-    y += h + kLineGap;
+    tft.drawString(lines[i].text, centerX(), y + h / 2);
+    y += h + lineGap();
   }
 }
 
@@ -100,25 +136,25 @@ constexpr float kConnectingDetailVlw = 0.92f;
 
 void applyConnectingDetailStyle() {
   if (displayFontIsSmooth()) {
-    displayFontSetSmoothSize(tft, kConnectingDetailVlw);
+    displayFontSetSmoothSize(tft, kConnectingDetailVlw * ui::radar::kScale);
   } else {
     displayFontSetBitmap(tft, &kConnectingGfxDetail);
   }
 }
 
-/** SSID on one line; truncate with … if wider than kConnectingTextMaxWidthPx. */
+/** SSID on one line; truncate with … if wider than connectingTextMaxWidthPx(). */
 void fitSsidLine() {
   strncpy(s_ssid_line, s_connecting_ssid, sizeof(s_ssid_line) - 1);
   s_ssid_line[sizeof(s_ssid_line) - 1] = '\0';
   applyConnectingDetailStyle();
-  if (tft.textWidth(s_ssid_line) <= kConnectingTextMaxWidthPx) {
+  if (tft.textWidth(s_ssid_line) <= connectingTextMaxWidthPx()) {
     return;
   }
   const size_t len = strlen(s_connecting_ssid);
   for (size_t n = len; n > 0; --n) {
     snprintf(s_ssid_line, sizeof(s_ssid_line), "%.*s…", static_cast<int>(n),
              s_connecting_ssid);
-    if (tft.textWidth(s_ssid_line) <= kConnectingTextMaxWidthPx) {
+    if (tft.textWidth(s_ssid_line) <= connectingTextMaxWidthPx()) {
       return;
     }
   }
@@ -134,16 +170,17 @@ void drawConnectingText() {
 
   applyConnectingDetailStyle();
   const int detail_h = tft.fontHeight();
-  const int total_h = detail_h * 2 + kLineGap;
-  const int block_top = (config::kDisplayHeight - total_h) / 2;
-  constexpr int kPanelPadY = 8;
-  tft.fillRect(kCenterX - kConnectingTextMaxWidthPx / 2, block_top - kPanelPadY,
-               kConnectingTextMaxWidthPx, total_h + kPanelPadY * 2, config::kColorBlack);
+  const int total_h = detail_h * 2 + lineGap();
+  const int block_top = (tft.height() - total_h) / 2;
+  const int panel_pad_y = scaled(8);
+  const int panel_w = connectingTextMaxWidthPx();
+  tft.fillRect(centerX() - panel_w / 2, block_top - panel_pad_y, panel_w,
+               total_h + panel_pad_y * 2, config::kColorBlack);
 
   int y = block_top;
-  tft.drawString("Connecting to", kCenterX, y + detail_h / 2);
-  y += detail_h + kLineGap;
-  tft.drawString(s_ssid_line, kCenterX, y + detail_h / 2);
+  tft.drawString("Connecting to", centerX(), y + detail_h / 2);
+  y += detail_h + lineGap();
+  tft.drawString(s_ssid_line, centerX(), y + detail_h / 2);
 
   s_connecting_text_drawn = true;
 }
@@ -153,7 +190,7 @@ void eraseSpinnerDots() {
     if (!s_spinner_dots[i].drawn) {
       continue;
     }
-    tft.fillCircle(s_spinner_dots[i].x, s_spinner_dots[i].y, kSpinnerEraseRadius,
+    tft.fillCircle(s_spinner_dots[i].x, s_spinner_dots[i].y, spinnerEraseRadius(),
                    config::kColorBlack);
     s_spinner_dots[i].drawn = false;
   }
@@ -165,12 +202,13 @@ void drawSpinnerDots() {
 
   for (int i = 0; i < kSpinnerDotCount; ++i) {
     const float a = head_rad - static_cast<float>(i) * (6.283185307f / kSpinnerDotCount);
-    const int x = kCenterX + static_cast<int>(std::lround(std::cos(a) * kSpinnerRadius));
-    const int y = kCenterY + static_cast<int>(std::lround(std::sin(a) * kSpinnerRadius));
+    const int radius = spinnerRadius();
+    const int x = centerX() + static_cast<int>(std::lround(std::cos(a) * radius));
+    const int y = centerY() + static_cast<int>(std::lround(std::sin(a) * radius));
 
     const int fade = 255 - i * 22;
     const uint16_t color = tft.color565(0, fade, 0);
-    tft.fillSmoothCircle(x, y, kSpinnerDotRadius, color);
+    tft.fillSmoothCircle(x, y, spinnerDotRadius(), color);
 
     s_spinner_dots[i].x = x;
     s_spinner_dots[i].y = y;
