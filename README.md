@@ -159,53 +159,46 @@ The shipping build.
 | SCL (SCLK) | GPIO **4** |
 | BOOT (user) | GPIO **9** |
 
-### GC9B72 (2.1″ round, 360×360) — proposed
+### GC9B72 (2.1″ round, 360×360) ↔ ESP32-C3 Super Mini
 
-> **In progress, not yet supported by the firmware.** The ESP32-C6 column also
-> needs a PlatformIO platform shipping Arduino core 3.x — the official
-> `espressif32` is still on 2.0.17 and has no C6 Arduino variant.
+| Display | ESP32-C3 | |
+|---------|----------|---|
+| VCC | 3V3 | **3.3 V only** — the module has no regulator |
+| GND | GND | |
+| RES | GPIO **0** | |
+| CS | GPIO **1** | |
+| DC | GPIO **10** | |
+| SDA (MOSI) | GPIO **3** | |
+| SCL (SCLK) | GPIO **4** | |
+| BL | GPIO **5** | backlight, on a GPIO so it can be dimmed |
+| SDO (MISO) | GPIO **6** | optional — see below |
+| TE | GPIO **7** | optional — see below |
+| BOOT (user) | GPIO **9** | on-board button |
 
-| Display | ESP32-C3 | ESP32-C6 | |
-|---------|----------|----------|---|
-| VCC | 3V3 | 3V3 | **3.3 V only** — the module has no regulator |
-| GND | GND | GND | |
-| RES | GPIO **0** | GPIO **0** | |
-| CS | GPIO **1** | GPIO **1** | |
-| DC | GPIO **10** | GPIO **2** | the one wire that differs — GPIO 10 is not broken out on the C6 |
-| SDA (MOSI) | GPIO **3** | GPIO **3** | |
-| SCL (SCLK) | GPIO **4** | GPIO **4** | |
-| BL | GPIO **5** | GPIO **5** | backlight, on a GPIO so it can be dimmed |
-| SDO (MISO) | GPIO **6** | GPIO **6** | optional — see below |
-| TE | GPIO **7** | GPIO **7** | optional — see below |
-| BOOT (user) | GPIO **9** | GPIO **9** | on-board button |
+Only `RES`, `CS`, `DC`, `SDA` and `SCL` are required; the rest are set to `-1` in
+`include/config.h` when not wired, and the firmware adapts.
 
-**SDO is unused by the radar.** Frames are composed in an off-screen sprite and
-pushed in one pass, so nothing reads back from the panel and `pin_miso` stays
-`-1`. It matters only on the fallback path taken when the sprite cannot be
-allocated, where LovyanGFX's antialiased primitives read the panel in order to
-blend against it — with SDO floating, those blends read garbage.
+**SDO (MISO).** The radar composes each frame in an off-screen sprite and pushes
+it in one pass, so nothing normally reads back from the panel. It matters on the
+fallback path taken when no frame sprite can be allocated, where LovyanGFX's
+antialiased primitives read the panel to blend against it — with SDO unwired
+those blends have nothing to read.
 
-**TE is not used by LovyanGFX.** Both GC9 init lists enable the tearing-effect
-output (`0x35 0x00`), but no SPI panel driver in LovyanGFX consumes it
-(`getScanLine()` returns `-1`), so using it means polling the pin from
-application code and starting the push just after the pulse. A full 360×360
-frame is 259,200 bytes on the wire — about 52 ms at 40 MHz — long enough for a
-seam to be visible.
-
-**Strapping pins.** Do not move DC to GPIO 2 on the **C3** to make the two boards
-identical: there it is a boot strapping pin that must be high at reset, and a
-high-impedance DC input will not hold it. On the C6, GPIO 2 is not a strapping
-pin (the C6's are GPIO 4, 5, 8, 9 and 15).
-
-**Board orientation.** Holding the C3 Super Mini with USB-C up, `GPIO5` and `5V`
-are the pads nearest the connector and `GPIO20`/`GPIO21` the two furthest.
-Published pinouts appear in both orientations — check the silkscreen, not a
-diagram.
+**TE (tearing effect).** The GC9B72 init sequence enables this output, but
+LovyanGFX does not consume it — `getScanLine()` returns `-1` for every SPI panel
+— so the firmware polls it directly in `displayWaitForFrameStart()` and starts
+the push on the edge. A full 360×360 frame is 259,200 bytes on the wire, about
+104 ms at 20 MHz, which is long enough for a seam to show without it. The wait
+times out after 25 ms so a miswired line cannot stall the main loop.
 
 **Backlight current.** The 2.1″ backlight draws several times what the 1.28″ one
-does, and rides the Super Mini's 3V3 LDO alongside WiFi TX bursts. Measure 3V3
-under load before trusting it; the TX power is already capped to 8.5 dBm for
+does, and rides the Super Mini's 3V3 LDO alongside WiFi transmit bursts. Measure
+3V3 under load before trusting it; TX power is already capped to 8.5 dBm for
 related reasons.
+
+**Board orientation.** Holding the Super Mini with USB-C up, `GPIO5` and `5V` are
+the pads nearest the connector and `GPIO20`/`GPIO21` the two furthest. Published
+pinouts appear in both orientations — check the silkscreen, not a diagram.
 
 ## Build
 

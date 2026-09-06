@@ -698,6 +698,7 @@ void renderFrame() {
     const DrawScope scope(s_frame);
     drawAircraft();
   }
+  displayWaitForFrameStart();
   s_frame.pushSprite(0, 0);
   tft.setTextDatum(textdatum_t::top_left);
 }

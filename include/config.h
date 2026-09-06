@@ -51,6 +51,18 @@ constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_4;  // display SCL
  * dimmed if the 3V3 rail sags under WiFi transmit. -1 = not wired.
  */
 constexpr int kDisplayPinBacklight = 5;
+/**
+ * SDO/MISO. Wire it and the panel becomes readable, which the antialiased
+ * primitives need on the direct-to-panel path taken when no frame sprite fits.
+ * -1 = not wired.
+ */
+constexpr int kDisplayPinMiso = 6;
+/**
+ * Tearing effect. The controller pulses this once per frame; waiting for it
+ * before pushing keeps a seam out of the picture. A full 360x360 frame is
+ * 259,200 B on the wire, long enough to tear without it. -1 = not wired.
+ */
+constexpr int kDisplayPinTe = 7;
 
 constexpr int kDisplayWidth = 360;
 constexpr int kDisplayHeight = 360;
@@ -72,6 +84,9 @@ constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_3;  // display SDA
 constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_4;  // display SCL
 /** Not wired on the GC9A01 modules — backlight is tied on at the module. */
 constexpr int kDisplayPinBacklight = -1;
+/** Neither is broken out on the GC9A01 modules. */
+constexpr int kDisplayPinMiso = -1;
+constexpr int kDisplayPinTe = -1;
 
 constexpr int kDisplayWidth = 240;
 constexpr int kDisplayHeight = 240;
