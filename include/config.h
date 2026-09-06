@@ -29,12 +29,49 @@ constexpr unsigned long kBootResetHoldMs = 3000UL;
 /** Ignore BOOT taps shorter than this (debounce). */
 constexpr unsigned long kBootTapMinMs = 40UL;
 
-// --- Display: GC9A01 1.28" round 240×240 (SPI) ---
+// --- Display ---
+// Two panels are supported. Define PLANE_RADAR_PANEL_GC9B72 (PlatformIO env
+// `supermini_gc9b72`) for the 2.1" 360x360 panel; the default is the 1.28"
+// GC9A01 the project shipped with. Wiring for both is in the README.
+//
+// kDisplayWidth/kDisplayHeight configure the panel driver. The UI does NOT read
+// them — it asks the driver at runtime via ui::radar::initMetrics(), so a panel
+// that reports a size of its own still lays out correctly.
+#if defined(PLANE_RADAR_PANEL_GC9B72)
+
+// GC9B72 2.1" round 360x360 (SPI)
 constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_0;
 constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_1;
 constexpr gpio_num_t kDisplayPinDc = GPIO_NUM_10;
 constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_3;  // display SDA
 constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_4;  // display SCL
+/**
+ * Backlight. The 2.1" backlight draws several times what the 1.28" one does, so
+ * it sits on a GPIO rather than being strapped to 3V3 — that way it can be
+ * dimmed if the 3V3 rail sags under WiFi transmit. -1 = not wired.
+ */
+constexpr int kDisplayPinBacklight = 5;
+
+constexpr int kDisplayWidth = 360;
+constexpr int kDisplayHeight = 360;
+
+/** The only published GC9B72 driver reports ~20 MHz tested on short leads. */
+constexpr uint32_t kDisplaySpiWriteHz = 20000000;
+// The GC9B72 init sequence does not set inversion itself, and this panel is
+// normally black — so, unlike the GC9A01 modules, it must not be inverted.
+constexpr bool kDisplayInvert = false;
+constexpr bool kDisplayRgbOrder = false;
+
+#else
+
+// GC9A01 1.28" round 240x240 (SPI)
+constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_0;
+constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_1;
+constexpr gpio_num_t kDisplayPinDc = GPIO_NUM_10;
+constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_3;  // display SDA
+constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_4;  // display SCL
+/** Not wired on the GC9A01 modules — backlight is tied on at the module. */
+constexpr int kDisplayPinBacklight = -1;
 
 constexpr int kDisplayWidth = 240;
 constexpr int kDisplayHeight = 240;
@@ -43,6 +80,8 @@ constexpr uint32_t kDisplaySpiWriteHz = 40000000;
 // GC9A01 modules often need invert + BGR for correct black/green output
 constexpr bool kDisplayInvert = true;
 constexpr bool kDisplayRgbOrder = true;
+
+#endif
 
 // --- Radar center defaults (overridden via WiFi setup portal) ---
 constexpr double kDefaultRadarLat = 52.3676;

@@ -663,13 +663,30 @@ bool ensureFrameSprite() {
   if (s_frame_ready) {
     return true;
   }
-  s_frame.setColorDepth(16);
-  if (!s_frame.createSprite(radar::kSize, radar::kSize)) {
-    Serial.println("radar: frame sprite alloc failed");
-    return false;
+
+  // Best colour depth that fits. 16bpp is 115,200 B at 240x240 and always wins
+  // there; at 360x360 it is 259,200 B, which an ESP32-C3 cannot spare once WiFi
+  // is up.
+  //
+  // 8 is the floor worth trying. LovyanGFX maps setColorDepth(8) to RGB332 — a
+  // true RGB format whose converter supports alpha blending. Palette depths go
+  // through copy_bit_affine instead, which masks raw bytes into index bits and
+  // silently corrupts every antialiased primitive we draw (fillSmoothCircle,
+  // drawWideLine), so there is deliberately no 4bpp rung.
+  static constexpr int kDepthLadder[] = {16, 8};
+
+  for (const int depth : kDepthLadder) {
+    s_frame.setColorDepth(depth);
+    if (s_frame.createSprite(radar::kSize, radar::kSize)) {
+      Serial.printf("radar: frame sprite %dx%d @%dbpp\n", radar::kSize,
+                    radar::kSize, depth);
+      s_frame_ready = true;
+      return true;
+    }
   }
-  s_frame_ready = true;
-  return true;
+
+  Serial.println("radar: no frame sprite fits - drawing direct to panel");
+  return false;
 }
 
 // Double-buffered frame: composite the grid AND aircraft into the off-screen

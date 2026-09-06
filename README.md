@@ -4,7 +4,9 @@
 
 **3D printed case (STL + assembly):** [MakerWorld](https://makerworld.com/en/models/2872376-esp32-plane-radar-live-ads-b-on-a-round-display#profileId-3207083) · **Firmware:** [Releases](https://github.com/MatixYo/ESP32-Plane-Radar/releases)
 
-Firmware for an **ESP32-C3 Super Mini** and a **1.28″ round GC9A01** display (240×240). Shows a circular **ADS-B radar** around your configured location, with **WiFiManager** for first-time setup.
+Firmware for an **ESP32-C3 Super Mini** and a round SPI display — **1.28″ GC9A01** (240×240) or **2.1″ GC9B72** (360×360). Shows a circular **ADS-B radar** around your configured location, with **WiFiManager** for first-time setup.
+
+The radar layout is derived from the panel size at runtime, so both displays get the same design scaled to fit rather than a second set of hand-tuned constants.
 
 ## What it does
 
@@ -138,7 +140,13 @@ src/
   services/
 ```
 
-## Wiring (GC9A01 ↔ ESP32-C3 Super Mini)
+## Wiring
+
+`BOOT (user)` is the on-board button on **GPIO 9** in every combination below — no wire.
+
+### GC9A01 (1.28″ round, 240×240) ↔ ESP32-C3 Super Mini
+
+The shipping build.
 
 | Display | ESP32-C3 |
 |---------|----------|
@@ -151,16 +159,84 @@ src/
 | SCL (SCLK) | GPIO **4** |
 | BOOT (user) | GPIO **9** |
 
+### GC9B72 (2.1″ round, 360×360) — proposed
+
+> **In progress, not yet supported by the firmware.** The ESP32-C6 column also
+> needs a PlatformIO platform shipping Arduino core 3.x — the official
+> `espressif32` is still on 2.0.17 and has no C6 Arduino variant.
+
+| Display | ESP32-C3 | ESP32-C6 | |
+|---------|----------|----------|---|
+| VCC | 3V3 | 3V3 | **3.3 V only** — the module has no regulator |
+| GND | GND | GND | |
+| RES | GPIO **0** | GPIO **0** | |
+| CS | GPIO **1** | GPIO **1** | |
+| DC | GPIO **10** | GPIO **2** | the one wire that differs — GPIO 10 is not broken out on the C6 |
+| SDA (MOSI) | GPIO **3** | GPIO **3** | |
+| SCL (SCLK) | GPIO **4** | GPIO **4** | |
+| BL | GPIO **5** | GPIO **5** | backlight, on a GPIO so it can be dimmed |
+| SDO (MISO) | GPIO **6** | GPIO **6** | optional — see below |
+| TE | GPIO **7** | GPIO **7** | optional — see below |
+| BOOT (user) | GPIO **9** | GPIO **9** | on-board button |
+
+**SDO is unused by the radar.** Frames are composed in an off-screen sprite and
+pushed in one pass, so nothing reads back from the panel and `pin_miso` stays
+`-1`. It matters only on the fallback path taken when the sprite cannot be
+allocated, where LovyanGFX's antialiased primitives read the panel in order to
+blend against it — with SDO floating, those blends read garbage.
+
+**TE is not used by LovyanGFX.** Both GC9 init lists enable the tearing-effect
+output (`0x35 0x00`), but no SPI panel driver in LovyanGFX consumes it
+(`getScanLine()` returns `-1`), so using it means polling the pin from
+application code and starting the push just after the pulse. A full 360×360
+frame is 259,200 bytes on the wire — about 52 ms at 40 MHz — long enough for a
+seam to be visible.
+
+**Strapping pins.** Do not move DC to GPIO 2 on the **C3** to make the two boards
+identical: there it is a boot strapping pin that must be high at reset, and a
+high-impedance DC input will not hold it. On the C6, GPIO 2 is not a strapping
+pin (the C6's are GPIO 4, 5, 8, 9 and 15).
+
+**Board orientation.** Holding the C3 Super Mini with USB-C up, `GPIO5` and `5V`
+are the pads nearest the connector and `GPIO20`/`GPIO21` the two furthest.
+Published pinouts appear in both orientations — check the silkscreen, not a
+diagram.
+
+**Backlight current.** The 2.1″ backlight draws several times what the 1.28″ one
+does, and rides the Super Mini's 3V3 LDO alongside WiFi TX bursts. Measure 3V3
+under load before trusting it; the TX power is already capped to 8.5 dBm for
+related reasons.
+
 ## Build
 
+Pick the environment that matches the display fitted:
+
+| Display | Environment | Resolution |
+|---------|-------------|------------|
+| 1.28″ GC9A01 | `supermini` | 240×240 |
+| 2.1″ GC9B72 | `supermini_gc9b72` | 360×360 |
+
 ```bash
-pio run -t upload
+# 1.28" GC9A01 (default)
+pio run -e supermini -t upload
+
+# 2.1" GC9B72
+pio run -e supermini_gc9b72 -t upload
+
 pio device monitor
 ```
 
-- PlatformIO env: **`supermini`**
 - Serial: **115200** baud
 - USB CDC on boot enabled in `platformio.ini` for the Super Mini
+- The two environments differ only by `-DPLANE_RADAR_PANEL_GC9B72`, which selects
+  the panel driver, pins, SPI clock and colour settings in `include/config.h`
+- The 360×360 frame buffer does not fit at 16 bits on an ESP32-C3, so the radar
+  falls back to 8-bit RGB332 (129,600 B instead of 259,200 B). The chosen depth is
+  printed at boot:
+
+  ```
+  radar: frame sprite 360x360 @8bpp
+  ```
 
 ### Web-flashable release image
 
