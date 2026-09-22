@@ -80,8 +80,6 @@ void rangeNext() {
 
 const RangePreset& rangeCurrent() { return kRangePresets[s_range_index]; }
 
-uint8_t rangeIndex() { return s_range_index; }
-
 float fetchRadiusKm() {
   const float outer_km = rangeCurrent().outer_km;
   const float screen_r_px =
