@@ -15,8 +15,9 @@ namespace {
 
 constexpr char kApiBase[] = "https://opendata.adsb.fi/api/v3/lat/";
 constexpr float kKmPerNm = 1.852f;
-constexpr int kConnectAttemptMs = 200;
-constexpr unsigned long kRequestTimeoutMs = 10000;
+constexpr int kConnectTimeoutMs = 5000;  // TLS handshake needs room
+constexpr int kConnectAttempts = 1;  // a stalled TLS connect blocks the UI; retry next poll instead
+constexpr unsigned long kRequestTimeoutMs = 6000;
 
 Aircraft s_aircraft[kMaxAircraft];
 size_t s_aircraft_count = 0;
@@ -26,63 +27,6 @@ void pollNetwork() {
   if (s_poll_fn != nullptr) {
     s_poll_fn();
   }
-}
-
-int performGetWithPoll(HTTPClient& http) {
-  http.setConnectTimeout(kConnectAttemptMs);
-  const unsigned long deadline = millis() + kRequestTimeoutMs;
-  while (millis() < deadline) {
-    pollNetwork();
-    const int code = http.GET();
-    if (code > 0) {
-      return code;
-    }
-    if (code != HTTPC_ERROR_CONNECTION_REFUSED &&
-        code != HTTPC_ERROR_NOT_CONNECTED) {
-      return code;
-    }
-    delay(5);
-  }
-  return HTTPC_ERROR_READ_TIMEOUT;
-}
-
-bool readResponseBodyWithPoll(HTTPClient& http, String& payload) {
-  WiFiClient* stream = http.getStreamPtr();
-  if (stream == nullptr) {
-    return false;
-  }
-
-  const int content_length = http.getSize();
-  if (content_length > 0) {
-    payload.reserve(static_cast<unsigned>(content_length + 1));
-  }
-
-  uint8_t buffer[512];
-  const unsigned long deadline = millis() + kRequestTimeoutMs;
-  while (millis() < deadline) {
-    pollNetwork();
-    const int available = stream->available();
-    if (available > 0) {
-      const int to_read =
-          available > static_cast<int>(sizeof(buffer)) ? static_cast<int>(sizeof(buffer))
-                                                       : available;
-      const int read_bytes = stream->readBytes(buffer, to_read);
-      if (read_bytes > 0) {
-        payload.concat(reinterpret_cast<const char*>(buffer),
-                       static_cast<unsigned>(read_bytes));
-      }
-    }
-    if (content_length > 0 &&
-        static_cast<int>(payload.length()) >= content_length) {
-      break;
-    }
-    if (!http.connected() && stream->available() <= 0) {
-      break;
-    }
-    delay(1);
-  }
-
-  return payload.length() > 0;
 }
 
 float kmToNauticalMiles(float km) { return km / kKmPerNm; }
@@ -187,6 +131,45 @@ void formatAltitudeTag(const JsonObject& plane, char* out, size_t out_len) {
   }
 }
 
+bool httpGetJson(const String& url, const char* tag, JsonDocument& doc,
+                 const JsonDocument& filter) {
+  WiFiClientSecure client;
+  client.setInsecure();
+
+  HTTPClient http;
+  if (!http.begin(client, url)) {
+    Serial.printf("%s: http.begin failed\n", tag);
+    return false;
+  }
+
+  http.useHTTP10(true);
+  http.setTimeout(kRequestTimeoutMs);
+  http.setConnectTimeout(kConnectTimeoutMs);
+
+  int code = 0;
+  for (int attempt = 0; attempt < kConnectAttempts; ++attempt) {
+    pollNetwork();
+    code = http.GET();
+    if (code > 0) {
+      break;
+    }
+  }
+  if (code != HTTP_CODE_OK) {
+    Serial.printf("%s: HTTP %d\n", tag, code);
+    http.end();
+    return false;
+  }
+
+  const DeserializationError err = deserializeJson(
+      doc, http.getStream(), DeserializationOption::Filter(filter));
+  http.end();
+  if (err) {
+    Serial.printf("%s: JSON parse error: %s\n", tag, err.c_str());
+    return false;
+  }
+  return true;
+}
+
 void fillTagFields(Aircraft* ac, const JsonObject& plane) {
   copyJsonStringTrimmed(plane, "flight", ac->callsign, sizeof(ac->callsign));
   if (ac->callsign[0] == '\0') {
@@ -215,36 +198,18 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   url += "/dist/";
   url += String(dist_nm, 1);
 
-  WiFiClientSecure client;
-  client.setInsecure();
-
-  HTTPClient http;
-  if (!http.begin(client, url)) {
-    Serial.println("adsb: http.begin failed");
-    return false;
+  // Keep only the fields we render; the rest never reaches RAM.
+  JsonDocument filter;
+  JsonObject f = filter["ac"].add<JsonObject>();
+  for (const char* key :
+       {"lat", "lon", "true_heading", "mag_heading", "track", "dir", "gs",
+        "tas", "ias", "alt_baro", "alt_geom", "flight", "hex", "t",
+        "category"}) {
+    f[key] = true;
   }
-
-  http.useHTTP10(true);
-  http.setTimeout(kRequestTimeoutMs);
-  const int code = performGetWithPoll(http);
-  if (code != HTTP_CODE_OK) {
-    Serial.printf("adsb: HTTP %d\n", code);
-    http.end();
-    return false;
-  }
-
-  String payload;
-  if (!readResponseBodyWithPoll(http, payload)) {
-    Serial.println("adsb: empty response");
-    http.end();
-    return false;
-  }
-  http.end();
 
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, payload);
-  if (err) {
-    Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
+  if (!httpGetJson(url, "adsb", doc, filter)) {
     return false;
   }
 
