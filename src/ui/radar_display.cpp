@@ -24,6 +24,8 @@ uint16_t kColorLabel = 0xFFFF;
 uint16_t kColorCenter = 0xFFFF;
 uint16_t kColorAircraft = 0x001F;
 uint16_t kColorTrackVector = 0xFFFF;
+uint16_t kColorAircraftPrivate = 0xFFE0;
+uint16_t kColorTrackVectorPrivate = 0x07E0;
 uint16_t kColorTagType = 0x5DFF;
 uint16_t kColorTagAltitude = 0xFFE0;
 uint16_t kColorRunway = 0x4D5F;
@@ -187,6 +189,17 @@ void initPalette() {
   }
   radar::kColorTrackVector =
       tft.color565(radar::kTrackR, radar::kTrackG, radar::kTrackB);
+  if (config::kDisplayRgbOrder) {
+    radar::kColorAircraftPrivate = tft.color565(
+        radar::kPrivateAircraftB, radar::kPrivateAircraftG, radar::kPrivateAircraftR);
+    radar::kColorTrackVectorPrivate = tft.color565(
+        radar::kPrivateTrackB, radar::kPrivateTrackG, radar::kPrivateTrackR);
+  } else {
+    radar::kColorAircraftPrivate = tft.color565(
+        radar::kPrivateAircraftR, radar::kPrivateAircraftG, radar::kPrivateAircraftB);
+    radar::kColorTrackVectorPrivate = tft.color565(
+        radar::kPrivateTrackR, radar::kPrivateTrackG, radar::kPrivateTrackB);
+  }
   radar::kColorTagType =
       tft.color565(radar::kTagTypeR, radar::kTagTypeG, radar::kTagTypeB);
   radar::kColorTagAltitude =
@@ -270,9 +283,8 @@ bool beyondRingEdgeDotFromLatLon(float lat, float lon, int* out_x, int* out_y) {
   return true;
 }
 
-void drawBeyondRingDot(int x, int y) {
-  s_draw->fillSmoothCircle(x, y, radar::kBeyondRingDotRadiusPx,
-                           radar::kColorAircraft);
+void drawBeyondRingDot(int x, int y, uint16_t color) {
+  s_draw->fillSmoothCircle(x, y, radar::kBeyondRingDotRadiusPx, color);
 }
 
 void clipPointToOuterRing(int x0, int y0, int* x1, int* y1) {
@@ -321,14 +333,17 @@ int speedLineLengthPx(float gs_knots) {
   return len;
 }
 
-void noseTip(int cx, int cy, float heading_deg, int* tip_x, int* tip_y) {
+void noseTip(int cx, int cy, float heading_deg, int* tip_x, int* tip_y,
+             float scale = 1.0f) {
   constexpr float kDegToRad = 0.01745329252f;
   const float rad = heading_deg * kDegToRad;
-  *tip_x = cx + static_cast<int>(lroundf(sinf(rad) * radar::kAircraftNoseLenPx));
-  *tip_y = cy - static_cast<int>(lroundf(cosf(rad) * radar::kAircraftNoseLenPx));
+  const float nose = radar::kAircraftNoseLenPx * scale;
+  *tip_x = cx + static_cast<int>(lroundf(sinf(rad) * nose));
+  *tip_y = cy - static_cast<int>(lroundf(cosf(rad) * nose));
 }
 
-void drawHeadingTriangle(int cx, int cy, float heading_deg, uint16_t color) {
+void drawHeadingTriangle(int cx, int cy, float heading_deg, uint16_t color,
+                         float scale = 1.0f) {
   constexpr float kDegToRad = 0.01745329252f;
   const float rad = heading_deg * kDegToRad;
   const float sin_h = sinf(rad);
@@ -336,15 +351,15 @@ void drawHeadingTriangle(int cx, int cy, float heading_deg, uint16_t color) {
 
   int tip_x = 0;
   int tip_y = 0;
-  noseTip(cx, cy, heading_deg, &tip_x, &tip_y);
+  noseTip(cx, cy, heading_deg, &tip_x, &tip_y, scale);
 
-  const int base_x =
-      cx - static_cast<int>(lroundf(sin_h * static_cast<float>(radar::kAircraftTailLenPx)));
-  const int base_y =
-      cy + static_cast<int>(lroundf(cos_h * static_cast<float>(radar::kAircraftTailLenPx)));
+  const float tail = radar::kAircraftTailLenPx * scale;
+  const float half = radar::kAircraftTailHalfPx * scale;
+  const int base_x = cx - static_cast<int>(lroundf(sin_h * tail));
+  const int base_y = cy + static_cast<int>(lroundf(cos_h * tail));
 
-  const int wing_x = static_cast<int>(lroundf(cos_h * radar::kAircraftTailHalfPx));
-  const int wing_y = static_cast<int>(lroundf(sin_h * radar::kAircraftTailHalfPx));
+  const int wing_x = static_cast<int>(lroundf(cos_h * half));
+  const int wing_y = static_cast<int>(lroundf(sin_h * half));
 
   s_draw->fillTriangle(tip_x, tip_y, base_x + wing_x, base_y + wing_y,
                        base_x - wing_x, base_y - wing_y, color);
@@ -459,6 +474,7 @@ struct BeyondDotDrawItem {
   int x = 0;
   int y = 0;
   int dist_sq = 0;
+  uint16_t color = 0;
 };
 
 void sortDrawItemsFarFirst(AircraftDrawItem* items, size_t count) {
@@ -522,13 +538,15 @@ void drawAircraft() {
     }
     dots[dot_count].x = dot_x;
     dots[dot_count].y = dot_y;
+    dots[dot_count].color = planes[i].is_private ? radar::kColorAircraftPrivate
+                                                 : radar::kColorAircraft;
     dots[dot_count].dist_sq = distSqFromCenter(dot_x, dot_y);
     ++dot_count;
   }
 
   sortBeyondDotsFarFirst(dots, dot_count);
   for (size_t d = 0; d < dot_count; ++d) {
-    drawBeyondRingDot(dots[d].x, dots[d].y);
+    drawBeyondRingDot(dots[d].x, dots[d].y, dots[d].color);
   }
 
   sortDrawItemsFarFirst(items, draw_count);
@@ -536,9 +554,13 @@ void drawAircraft() {
     const size_t i = items[d].index;
     const int x = items[d].x;
     const int y = items[d].y;
+    const bool priv = planes[i].is_private;
     drawSpeedVector(x, y, planes[i].nose_deg, planes[i].track_deg,
-                    planes[i].gs_knots, radar::kColorTrackVector);
-    drawHeadingTriangle(x, y, planes[i].nose_deg, radar::kColorAircraft);
+                    planes[i].gs_knots,
+                    priv ? radar::kColorTrackVectorPrivate : radar::kColorTrackVector);
+    drawHeadingTriangle(x, y, planes[i].nose_deg,
+                        priv ? radar::kColorAircraftPrivate : radar::kColorAircraft,
+                        priv ? radar::kPrivateAircraftScale : 1.0f);
   }
   for (size_t d = 0; d < draw_count; ++d) {
     const size_t i = items[d].index;

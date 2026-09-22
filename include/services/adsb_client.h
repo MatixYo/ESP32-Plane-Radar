@@ -13,6 +13,7 @@ struct Aircraft {
   char callsign[9];
   char type[5];
   char alt[12];
+  bool is_private;  // light/small aircraft (ADS-B category A1/A2) or N-number
 };
 
 constexpr size_t kMaxAircraft = 64;

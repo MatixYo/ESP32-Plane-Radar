@@ -58,6 +58,8 @@ constexpr int kAircraftInsideRingInsetPx =
 
 /** Beyond-ring traffic: bearing cues on screen rim (correct direction, fixed radius). */
 constexpr int kBeyondRingDotRadiusPx = 4;
+/** Private/small aircraft are drawn at this fraction of airliner size. */
+constexpr float kPrivateAircraftScale = 0.6f;
 constexpr int kBeyondRingScreenMarginPx = 2;
 /** Target cap height (px) for aircraft tags (bold, slightly above scale label). */
 constexpr int kAircraftTagLabelHeightPx = 13;
@@ -75,6 +77,13 @@ constexpr uint8_t kAircraftB = 0;
 constexpr uint8_t kTrackR = 255;
 constexpr uint8_t kTrackG = 0;
 constexpr uint8_t kTrackB = 255;
+// Private / general aviation: yellow plane, green track.
+constexpr uint8_t kPrivateAircraftR = 255;
+constexpr uint8_t kPrivateAircraftG = 255;
+constexpr uint8_t kPrivateAircraftB = 0;
+constexpr uint8_t kPrivateTrackR = 0;
+constexpr uint8_t kPrivateTrackG = 255;
+constexpr uint8_t kPrivateTrackB = 0;
 constexpr uint8_t kTagTypeR = 255;
 constexpr uint8_t kTagTypeG = 200;
 constexpr uint8_t kTagTypeB = 0;
@@ -95,6 +104,8 @@ extern uint16_t kColorLabel;
 extern uint16_t kColorCenter;
 extern uint16_t kColorAircraft;
 extern uint16_t kColorTrackVector;
+extern uint16_t kColorAircraftPrivate;
+extern uint16_t kColorTrackVectorPrivate;
 extern uint16_t kColorTagType;
 extern uint16_t kColorTagAltitude;
 extern uint16_t kColorRunway;
