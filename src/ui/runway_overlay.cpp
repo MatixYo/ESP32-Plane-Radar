@@ -145,20 +145,21 @@ bool segmentIntersectsDisc(int x0, int y0, int x1, int y1) {
   const int dy = y1 - y0;
   const int fx = x0 - cx;
   const int fy = y0 - cy;
-  const int a = dx * dx + dy * dy;
-  if (a == 0) {
+  const float a = static_cast<float>(dx) * dx + static_cast<float>(dy) * dy;
+  if (a == 0.0f) {
     return false;
   }
-  const int b = 2 * (fx * dx + fy * dy);
-  const int c = fx * fx + fy * fy - r_sq;
-  int disc = b * b - 4 * a * c;
-  if (disc < 0) {
+  const float b = 2.0f * (static_cast<float>(fx) * dx + static_cast<float>(fy) * dy);
+  const float c = static_cast<float>(fx) * fx + static_cast<float>(fy) * fy -
+                  static_cast<float>(r_sq);
+  const float disc = b * b - 4.0f * a * c;
+  if (disc < 0.0f) {
     return false;
   }
-  disc = static_cast<int>(sqrtf(static_cast<float>(disc)));
-  const float inv2a = 1.0f / (2.0f * static_cast<float>(a));
-  const float t0 = (-static_cast<float>(b) - disc) * inv2a;
-  const float t1 = (-static_cast<float>(b) + disc) * inv2a;
+  const float sq = sqrtf(disc);
+  const float inv2a = 1.0f / (2.0f * a);
+  const float t0 = (-b - sq) * inv2a;
+  const float t1 = (-b + sq) * inv2a;
   return (t0 >= 0.0f && t0 <= 1.0f) || (t1 >= 0.0f && t1 <= 1.0f);
 }
 

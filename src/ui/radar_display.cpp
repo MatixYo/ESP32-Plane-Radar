@@ -46,9 +46,6 @@ const lgfx::GFXfont* s_tag_gfx = &fonts::FreeSansBold12pt7b;
 bool s_tag_label_metrics_ready = false;
 bool s_tag_use_vlw = false;
 
-int s_scale_label_max_w = 0;
-int s_scale_label_h = 0;
-
 lgfx::LovyanGFX* s_draw = &tft;
 LGFX_Sprite s_frame(&tft);
 bool s_frame_ready = false;
@@ -133,21 +130,6 @@ void initLabelMetrics() {
                                                &fonts::FreeSansBold12pt7b};
     s_scale_gfx = pickGfxFontClosest(scale_target, scale_candidates, 2);
     s_scale_use_vlw = false;
-  }
-
-  applyScaleStyle();
-  s_scale_label_h = tft.fontHeight();
-  s_scale_label_max_w = 0;
-  char label[12];
-  for (size_t i = 0; i < radar::kRangePresetCount; ++i) {
-    for (bool miles : {false, true}) {
-      radar::formatRing3Label(label, sizeof(label), radar::kRangePresets[i].ring3_km,
-                              miles);
-      const int w = tft.textWidth(label);
-      if (w > s_scale_label_max_w) {
-        s_scale_label_max_w = w;
-      }
-    }
   }
 
   s_label_metrics_ready = true;
@@ -382,7 +364,6 @@ void applyTagStyle() {
 }
 
 int measureTagBlockWidth(const services::adsb::Aircraft& plane) {
-  applyTagStyle();
   int max_w = 0;
   if (plane.callsign[0] != '\0') {
     const int w = s_draw->textWidth(plane.callsign);
@@ -406,9 +387,6 @@ int measureTagBlockWidth(const services::adsb::Aircraft& plane) {
 }
 
 void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
-  initTagLabelMetrics();
-  applyTagStyle();
-
   const int line_h = s_draw->fontHeight();
   const int block_w = measureTagBlockWidth(plane);
   const int block_h = line_h * 3;
@@ -488,7 +466,13 @@ void sortBeyondDotsFarFirst(BeyondDotDrawItem* items, size_t count) {
 void drawAircraft() {
   initLabelMetrics();
 
-  const size_t n = services::adsb::aircraftCount();
+  // Stale data (no successful fetch recently) shows an empty scope rather
+  // than aircraft frozen at their last known positions.
+  constexpr unsigned long kAircraftStaleAfterMs = 15000;
+  const size_t n =
+      (millis() - services::adsb::lastSuccessMs() > kAircraftStaleAfterMs)
+          ? 0
+          : services::adsb::aircraftCount();
   const services::adsb::Aircraft* planes = services::adsb::aircraftList();
 
   AircraftDrawItem items[services::adsb::kMaxAircraft];
@@ -531,6 +515,8 @@ void drawAircraft() {
     drawBeyondRingDot(dots[d].x, dots[d].y);
   }
 
+  initTagLabelMetrics();
+  applyTagStyle();  // once per frame; tag text metrics stay valid below
   sortDrawItemsFarFirst(items, draw_count);
   for (size_t d = 0; d < draw_count; ++d) {
     const size_t i = items[d].index;
@@ -651,7 +637,6 @@ void drawStaticGrid(Gfx& gfx) {
   gfx.fillScreen(radar::kColorBackground);
   drawRings(cx, cy, grid_r);
   drawCrosshairs(cx, cy, grid_r, radar::kColorGrid);
-  initPalette();
   runway::drawLargeAirportRunways(gfx);
   drawCenterDot(cx, cy);
   drawCardinalLabels();

@@ -27,4 +27,7 @@ void setPollFn(PollFn fn);
 /** Fetch aircraft within fetch_radius_km of center_lat/lon from adsb.fi. */
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km);
 
+/** millis() of the last successful fetch (0 = never). */
+unsigned long lastSuccessMs();
+
 }  // namespace services::adsb

@@ -21,6 +21,7 @@ constexpr unsigned long kRequestTimeoutMs = 10000;
 Aircraft s_aircraft[kMaxAircraft];
 size_t s_aircraft_count = 0;
 PollFn s_poll_fn = nullptr;
+unsigned long s_last_success_ms = 0;
 
 void pollNetwork() {
   if (s_poll_fn != nullptr) {
@@ -30,8 +31,8 @@ void pollNetwork() {
 
 int performGetWithPoll(HTTPClient& http) {
   http.setConnectTimeout(kConnectAttemptMs);
-  const unsigned long deadline = millis() + kRequestTimeoutMs;
-  while (millis() < deadline) {
+  const unsigned long start = millis();
+  while (millis() - start < kRequestTimeoutMs) {
     pollNetwork();
     const int code = http.GET();
     if (code > 0) {
@@ -58,8 +59,8 @@ bool readResponseBodyWithPoll(HTTPClient& http, String& payload) {
   }
 
   uint8_t buffer[512];
-  const unsigned long deadline = millis() + kRequestTimeoutMs;
-  while (millis() < deadline) {
+  const unsigned long start = millis();
+  while (millis() - start < kRequestTimeoutMs) {
     pollNetwork();
     const int available = stream->available();
     if (available > 0) {
@@ -276,8 +277,11 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   }
 
   s_aircraft_count = n;
+  s_last_success_ms = millis();
   Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
   return true;
 }
+
+unsigned long lastSuccessMs() { return s_last_success_ms; }
 
 }  // namespace services::adsb
