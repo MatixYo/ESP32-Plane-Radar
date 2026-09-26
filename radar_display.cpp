@@ -15,6 +15,8 @@
 #include "ui/radar_theme.h"
 #include "ui/runway_overlay.h"
 
+namespace fonts = lgfx::v1::fonts;
+
 namespace ui {
 namespace radar {
 
@@ -198,16 +200,11 @@ void initPalette() {
 }
 
 constexpr float kKmPerDeg = 111.0f;
-constexpr float kDegToRad = 3.14159265f / 180.0f;
 
 void offsetKmFromCenter(float lat, float lon, float* dx_km, float* dy_km,
                         float* dist_km) {
-  // Longitude degrees shrink toward the poles; scale by cos(latitude) so
-  // east-west distance isn't overstated away from the equator.
-  const float center_lat_rad =
-      static_cast<float>(services::location::lat()) * kDegToRad;
-  *dx_km = static_cast<float>(lon - services::location::lon()) * kKmPerDeg *
-           cosf(center_lat_rad);
+  *dx_km =
+      static_cast<float>(lon - services::location::lon()) * kKmPerDeg;
   *dy_km =
       static_cast<float>(lat - services::location::lat()) * kKmPerDeg;
   *dist_km = sqrtf((*dx_km) * (*dx_km) + (*dy_km) * (*dy_km));
@@ -411,7 +408,7 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
 
   const int line_h = s_draw->fontHeight();
   const int block_w = measureTagBlockWidth(plane);
-  const int block_h = line_h;
+  const int block_h = line_h * 3;
   int ly = y - block_h / 2;
 
   const int symbol_half =
@@ -433,7 +430,19 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   if (plane.callsign[0] != '\0') {
     s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
     s_draw->drawString(plane.callsign, anchor_x, ly);
-}
+  }
+  ly += line_h;
+
+  if (plane.type[0] != '\0') {
+    s_draw->setTextColor(radar::kColorTagType, radar::kColorBackground);
+    s_draw->drawString(plane.type, anchor_x, ly);
+  }
+  ly += line_h;
+
+  if (plane.alt[0] != '\0') {
+    s_draw->setTextColor(radar::kColorTagAltitude, radar::kColorBackground);
+    s_draw->drawString(plane.alt, anchor_x, ly);
+  }
 }
 
 struct AircraftDrawItem {
