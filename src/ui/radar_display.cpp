@@ -52,6 +52,8 @@ int s_scale_label_h = 0;
 lgfx::LovyanGFX* s_draw = &tft;
 LGFX_Sprite s_frame(&tft);
 bool s_frame_ready = false;
+bool s_select_mode_active = false;
+int s_selected_aircraft_idx = -1;
 
 class DrawScope {
  public:
@@ -405,7 +407,8 @@ int measureTagBlockWidth(const services::adsb::Aircraft& plane) {
   return max_w;
 }
 
-void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
+void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane,
+                     bool is_highlighted = false) {
   initTagLabelMetrics();
   applyTagStyle();
 
@@ -430,20 +433,29 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   }
   ly = std::max(1, std::min(ly, radar::kSize - block_h - 1));
 
+  if (is_highlighted) {
+    const int bx = tag_on_right ? anchor_x - 3 : anchor_x - block_w - 3;
+    s_draw->fillRoundRect(bx, ly - 2, block_w + 6, block_h + 4, 3, 0x0000);
+    s_draw->drawRoundRect(bx, ly - 2, block_w + 6, block_h + 4, 3, 0xFFE0);
+  }
+
   if (plane.callsign[0] != '\0') {
-    s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
+    s_draw->setTextColor(is_highlighted ? 0xFFE0 : radar::kColorLabel,
+                         radar::kColorBackground);
     s_draw->drawString(plane.callsign, anchor_x, ly);
   }
   ly += line_h;
 
   if (plane.type[0] != '\0') {
-    s_draw->setTextColor(radar::kColorTagType, radar::kColorBackground);
+    s_draw->setTextColor(is_highlighted ? 0xFFE0 : radar::kColorTagType,
+                         radar::kColorBackground);
     s_draw->drawString(plane.type, anchor_x, ly);
   }
   ly += line_h;
 
   if (plane.alt[0] != '\0') {
-    s_draw->setTextColor(radar::kColorTagAltitude, radar::kColorBackground);
+    s_draw->setTextColor(is_highlighted ? 0xFFE0 : radar::kColorTagAltitude,
+                         radar::kColorBackground);
     s_draw->drawString(plane.alt, anchor_x, ly);
   }
 }
@@ -536,13 +548,30 @@ void drawAircraft() {
     const size_t i = items[d].index;
     const int x = items[d].x;
     const int y = items[d].y;
+    const bool is_sel =
+        (s_select_mode_active && s_selected_aircraft_idx == static_cast<int>(i));
+
+    if (is_sel) {
+      // Draw bright yellow targeting reticle around selected aircraft
+      s_draw->drawCircle(x, y, 14, 0xFFE0);
+      s_draw->drawCircle(x, y, 15, 0xFFE0);
+      s_draw->drawFastHLine(x - 20, y, 7, 0xFFE0);
+      s_draw->drawFastHLine(x + 14, y, 7, 0xFFE0);
+      s_draw->drawFastVLine(x, y - 20, 7, 0xFFE0);
+      s_draw->drawFastVLine(x, y + 14, 7, 0xFFE0);
+    }
+
     drawSpeedVector(x, y, planes[i].nose_deg, planes[i].track_deg,
-                    planes[i].gs_knots, radar::kColorTrackVector);
-    drawHeadingTriangle(x, y, planes[i].nose_deg, radar::kColorAircraft);
+                    planes[i].gs_knots,
+                    is_sel ? 0xFFE0 : radar::kColorTrackVector);
+    drawHeadingTriangle(x, y, planes[i].nose_deg,
+                        is_sel ? 0xFFE0 : radar::kColorAircraft);
   }
   for (size_t d = 0; d < draw_count; ++d) {
     const size_t i = items[d].index;
-    drawAircraftTag(items[d].x, items[d].y, planes[i]);
+    const bool is_sel =
+        (s_select_mode_active && s_selected_aircraft_idx == static_cast<int>(i));
+    drawAircraftTag(items[d].x, items[d].y, planes[i], is_sel);
   }
 }
 
@@ -664,12 +693,67 @@ bool ensureFrameSprite() {
     return true;
   }
   s_frame.setColorDepth(16);
-  if (!s_frame.createSprite(radar::kSize, radar::kSize)) {
-    Serial.println("radar: frame sprite alloc failed");
-    return false;
+  if (s_frame.createSprite(radar::kSize, radar::kSize)) {
+    s_frame_ready = true;
+    return true;
   }
-  s_frame_ready = true;
-  return true;
+  Serial.println("radar: 16-bit frame sprite alloc failed, trying 8-bit");
+  s_frame.setColorDepth(8);
+  if (s_frame.createSprite(radar::kSize, radar::kSize)) {
+    s_frame_ready = true;
+    return true;
+  }
+  Serial.println("radar: frame sprite alloc failed, drawing directly to display");
+  return false;
+}
+
+void drawModeBanner(lgfx::LovyanGFX* gfx) {
+  if (gfx == nullptr) return;
+  const size_t n = services::adsb::aircraftCount();
+  const services::adsb::Aircraft* planes = services::adsb::aircraftList();
+
+  gfx->setTextDatum(textdatum_t::bottom_center);
+  gfx->setFont(&fonts::Font0);
+
+  char buf[48];
+  uint16_t text_col = 0x07E0;
+  uint16_t border_col = 0x03E0;
+
+  if (s_select_mode_active) {
+    if (s_selected_aircraft_idx >= 0 &&
+        s_selected_aircraft_idx < static_cast<int>(n)) {
+      const auto& p = planes[s_selected_aircraft_idx];
+      snprintf(buf, sizeof(buf), "[ CIL %d/%d: %s  %.1fkm ]",
+               s_selected_aircraft_idx + 1, static_cast<int>(n),
+               p.callsign[0] != '\0' ? p.callsign : (p.hex[0] != '\0' ? p.hex : "AC"),
+               p.dist_km);
+      text_col = 0xFFE0;
+      border_col = 0xFFE0;
+    } else {
+      snprintf(buf, sizeof(buf), "[ VYBER LETADLA (STISK=ZPET) ]");
+      text_col = 0x07FF;
+      border_col = 0x07FF;
+    }
+  } else {
+    char range_label[16];
+    radar::formatCurrentRing3Label(range_label, sizeof(range_label));
+    snprintf(buf, sizeof(buf), "[ MERITKO: %s ]", range_label);
+    text_col = 0x07E0;
+    border_col = 0x03E0;
+  }
+
+  const int tw = gfx->textWidth(buf);
+  constexpr int pad_x = 8;
+  constexpr int pad_y = 3;
+  const int h = gfx->fontHeight() + pad_y * 2;
+  const int w = tw + pad_x * 2;
+  const int bx = (radar::kSize - w) / 2;
+  const int by = 346 - h;
+
+  gfx->fillRoundRect(bx, by, w, h, 4, 0x0000);
+  gfx->drawRoundRect(bx, by, w, h, 4, border_col);
+  gfx->setTextColor(text_col, 0x0000);
+  gfx->drawString(buf, radar::kCenterX, 346 - pad_y);
 }
 
 // Double-buffered frame: composite the grid AND aircraft into the off-screen
@@ -680,6 +764,7 @@ void renderFrame() {
   {
     const DrawScope scope(s_frame);
     drawAircraft();
+    drawModeBanner(&s_frame);
   }
   s_frame.pushSprite(0, 0);
   tft.setTextDatum(textdatum_t::top_left);
@@ -700,6 +785,7 @@ void radarDisplayDraw() {
   const DrawScope scope(tft);
   drawStaticGrid(tft);
   drawAircraft();
+  drawModeBanner(&tft);
   tft.setTextDatum(textdatum_t::top_left);
 }
 
@@ -712,6 +798,19 @@ void radarDisplayRefreshAircraft() {
   }
 
   radarDisplayDraw();
+}
+
+void radarSetSelection(bool select_mode, int selected_aircraft_idx) {
+  s_select_mode_active = select_mode;
+  s_selected_aircraft_idx = selected_aircraft_idx;
+}
+
+lgfx::LGFX_Sprite& sharedFrameSprite() {
+  return s_frame;
+}
+
+bool ensureSharedFrameSprite() {
+  return ensureFrameSprite();
 }
 
 }  // namespace ui

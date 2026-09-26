@@ -29,6 +29,7 @@ constexpr RangePreset kRangePresets[] = {
     {10.0f, 10.0f * kRing3ToOuterKm},
     {15.0f, 15.0f * kRing3ToOuterKm},
     {25.0f, 25.0f * kRing3ToOuterKm},
+    {50.0f, 50.0f * kRing3ToOuterKm},
 };
 
 constexpr size_t kRangePresetCount =
@@ -36,8 +37,10 @@ constexpr size_t kRangePresetCount =
 
 /** Load saved range and distance units from flash. Call once after boot. */
 void rangeInit();
-/** Cycle preset and save to flash. */
+/** Cycle preset up (CW) and save to flash. */
 void rangeNext();
+/** Cycle preset down (CCW) and save to flash. */
+void rangePrev();
 const RangePreset& rangeCurrent();
 uint8_t rangeIndex();
 /** ADSB fetch radius (km): scaled to screen edge so beyond-ring dots have data. */
