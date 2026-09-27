@@ -2,11 +2,17 @@
 
 #include <cstdint>
 
+#include "config.h"
+
 namespace ui::radar {
 
 constexpr int kSize = 240;
-constexpr int kCenterX = kSize / 2;
-constexpr int kCenterY = kSize / 2;
+constexpr int kOffsetX = config::kRadarViewportX;
+constexpr int kOffsetY = config::kRadarViewportY;
+constexpr int kRight = kOffsetX + kSize - 1;
+constexpr int kBottom = kOffsetY + kSize - 1;
+constexpr int kCenterX = kOffsetX + kSize / 2;
+constexpr int kCenterY = kOffsetY + kSize / 2;
 
 /** Outermost grid ring (inside edge labels). */
 constexpr int kGridOuterRadius = 107;
