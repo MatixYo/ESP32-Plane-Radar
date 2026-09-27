@@ -11,6 +11,7 @@
 #include "hardware/display.h"
 #include "hardware/display_font.h"
 
+
 namespace {
 
 constexpr int kLineGap = 6;
