@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "config.h"
+#include "data/airlines.h"
 
 namespace services::adsb {
 
@@ -172,6 +173,8 @@ bool httpGetJson(const String& url, const char* tag, JsonDocument& doc,
 
 void fillTagFields(Aircraft* ac, const JsonObject& plane) {
   copyJsonStringTrimmed(plane, "flight", ac->callsign, sizeof(ac->callsign));
+  // Resolve the airline from the flight callsign before any hex fallback.
+  ac->airline = data::airlines::forCallsign(ac->callsign);
   if (ac->callsign[0] == '\0') {
     copyJsonStringTrimmed(plane, "hex", ac->callsign, sizeof(ac->callsign));
   }

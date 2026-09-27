@@ -381,37 +381,57 @@ void applyTagStyle() {
   }
 }
 
-int measureTagBlockWidth(const services::adsb::Aircraft& plane) {
-  applyTagStyle();
-  int max_w = 0;
-  if (plane.callsign[0] != '\0') {
-    const int w = s_draw->textWidth(plane.callsign);
-    if (w > max_w) {
-      max_w = w;
+struct TagLine {
+  const char* text;
+  uint16_t color;
+};
+
+constexpr int kMaxTagLines = 4;
+
+// Builds the tag lines for an aircraft into out_lines. The airline line is shown
+// (full name or friendly abbreviation) only when enabled and resolved.
+int buildTagLines(const services::adsb::Aircraft& plane, TagLine* out_lines) {
+  int n = 0;
+  const ui::radar::AirlineDisplay mode = ui::radar::airlineDisplay();
+  if (mode != ui::radar::AirlineDisplay::kNone && plane.airline != nullptr) {
+    const char* text = (mode == ui::radar::AirlineDisplay::kAbbrev)
+                           ? plane.airline->short_name
+                           : plane.airline->name;
+    if (text != nullptr && text[0] != '\0') {
+      out_lines[n++] = {text, radar::kColorLabel};
     }
+  }
+  if (plane.callsign[0] != '\0') {
+    out_lines[n++] = {plane.callsign, radar::kColorLabel};
   }
   if (plane.type[0] != '\0') {
-    const int w = s_draw->textWidth(plane.type);
-    if (w > max_w) {
-      max_w = w;
-    }
+    out_lines[n++] = {plane.type, radar::kColorTagType};
   }
   if (plane.alt[0] != '\0') {
-    const int w = s_draw->textWidth(plane.alt);
-    if (w > max_w) {
-      max_w = w;
-    }
+    out_lines[n++] = {plane.alt, radar::kColorTagAltitude};
   }
-  return max_w;
+  return n;
 }
 
 void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   initTagLabelMetrics();
   applyTagStyle();
 
+  TagLine lines[kMaxTagLines];
+  const int n_lines = buildTagLines(plane, lines);
+  if (n_lines == 0) {
+    return;
+  }
+
   const int line_h = s_draw->fontHeight();
-  const int block_w = measureTagBlockWidth(plane);
-  const int block_h = line_h * 3;
+  int block_w = 0;
+  for (int i = 0; i < n_lines; ++i) {
+    const int w = s_draw->textWidth(lines[i].text);
+    if (w > block_w) {
+      block_w = w;
+    }
+  }
+  const int block_h = line_h * n_lines;
   int ly = y - block_h / 2;
 
   const int symbol_half =
@@ -430,21 +450,10 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   }
   ly = std::max(1, std::min(ly, radar::kSize - block_h - 1));
 
-  if (plane.callsign[0] != '\0') {
-    s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
-    s_draw->drawString(plane.callsign, anchor_x, ly);
-  }
-  ly += line_h;
-
-  if (plane.type[0] != '\0') {
-    s_draw->setTextColor(radar::kColorTagType, radar::kColorBackground);
-    s_draw->drawString(plane.type, anchor_x, ly);
-  }
-  ly += line_h;
-
-  if (plane.alt[0] != '\0') {
-    s_draw->setTextColor(radar::kColorTagAltitude, radar::kColorBackground);
-    s_draw->drawString(plane.alt, anchor_x, ly);
+  for (int i = 0; i < n_lines; ++i) {
+    s_draw->setTextColor(lines[i].color, radar::kColorBackground);
+    s_draw->drawString(lines[i].text, anchor_x, ly);
+    ly += line_h;
   }
 }
 
