@@ -1,209 +1,431 @@
-# Plane Radar
+# Plane Radar — ESP32-2424S012
 
-<img width="800" height="450" alt="plane-radar" src="https://github.com/user-attachments/assets/716d0992-dab8-47ba-8f1a-2aec7f607419" />
+ESP32 firmware that displays live ADS-B aircraft around a configured location on the round 240×240 display built into the **ESP32-2424S012**.
 
-**3D printed case (STL + assembly):** [MakerWorld](https://makerworld.com/en/models/2872376-esp32-plane-radar-live-ads-b-on-a-round-display#profileId-3207083) · **Firmware:** [Releases](https://github.com/MatixYo/ESP32-Plane-Radar/releases)
+This version is adapted from **MatixYo/ESP32-Plane-Radar** for the ESP32-2424S012 development board, which combines:
 
-Firmware for an **ESP32-C3 Super Mini** and a **1.28″ round GC9A01** display (240×240). Shows a circular **ADS-B radar** around your configured location, with **WiFiManager** for first-time setup.
+* ESP32-C3
+* 1.28" round 240×240 GC9A01 LCD
+* Integrated LCD backlight
+* USB-C
+* Optional CST816 capacitive touch controller
+
+The display is built into the board, so no external LCD wiring is required.
 
 ## What it does
 
-1. **Wi‑Fi setup** (if needed) — captive portal on AP **`PlaneRadar-Setup`**
-2. **Radar** — live aircraft from [adsb.fi](https://opendata.adsb.fi/) on a sonar-style grid
+Plane Radar shows nearby aircraft on a circular radar-style display using live ADS-B data.
 
-After Wi‑Fi is saved, the device reconnects automatically; the radar runs in the main loop with periodic ADS-B updates (~5 s).
+On startup the firmware:
 
-## Controls (BOOT, GPIO 9, active LOW)
+1. Connects to the configured Wi-Fi network.
+2. Opens a setup portal if Wi-Fi or location details have not yet been configured.
+3. Downloads nearby aircraft data.
+4. Displays aircraft position, direction, altitude and other available information on the round radar display.
+5. Periodically refreshes ADS-B data while the radar continues running.
 
-| Action | Effect |
-|--------|--------|
-| **Short tap** | Cycle range preset (5 → 10 → 15 → 25 km); saved to flash |
-| **Hold 3 s** | Clear Wi‑Fi, location, and units; reboot into setup portal |
+## Hardware
 
-During setup you can also hold BOOT at power-on to force a credential reset (same as the long press).
+Target board:
 
-## Wi‑Fi setup portal
+**ESP32-2424S012**
 
-**First-time setup** (no saved Wi‑Fi):
+Main hardware:
 
-1. Connect to **`PlaneRadar-Setup`**
-2. Open **`http://plane-radar.local`** (preferred) or **`http://192.168.4.1`** — both are shown on the yellow setup screen; captive portal may open automatically
-3. Set home Wi‑Fi, then save
+| Component         | Device                          |
+| ----------------- | ------------------------------- |
+| MCU               | ESP32-C3                        |
+| Display           | GC9A01                          |
+| Resolution        | 240 × 240                       |
+| Display interface | SPI                             |
+| Backlight         | GPIO controlled                 |
+| Touch             | CST816S/D on supported variants |
+| USB               | USB-C                           |
 
-**Reconfigure anytime** (after the device is on your network):
+Touch is not currently required by Plane Radar.
 
-1. Open **`http://plane-radar.local`** or **`http://<device-ip>`** (e.g. from your router or serial log at boot)
-2. Change Wi‑Fi, location, units, or runway overlay; save
+## ESP32-2424S012 display pinout
 
-The same portal runs on the setup AP and on the device’s LAN IP while connected to Wi‑Fi. mDNS hostname is `plane-radar` → **plane-radar.local** (`kPortalHostname` in `config.h`). Some clients resolve `.local` slowly; use the IP if needed.
+The GC9A01 is permanently connected to the ESP32-C3 on this board.
 
-**Custom fields** (stored in NVS):
+| Function      |                 GPIO |
+| ------------- | -------------------: |
+| LCD SCLK      |               GPIO 6 |
+| LCD MOSI      |               GPIO 7 |
+| LCD DC        |               GPIO 2 |
+| LCD CS        |              GPIO 10 |
+| LCD RESET     | Not connected (`-1`) |
+| LCD backlight |               GPIO 3 |
+| BOOT button   |               GPIO 9 |
 
-| Field | Purpose |
-|-------|---------|
-| **Latitude / Longitude** | Radar center and ADS-B query position (defaults in `config.h` until set) |
-| **Display distances in miles** | Ring scale label in **mi** instead of **km** (e.g. `6mi` vs `10km`) |
-| **Show airport runways** | Major-airport runway overlay on the radar (off to hide) |
+The LCD is write-only in the Plane Radar configuration, so MISO is not used.
 
-After a reset, the device reboots and shows the setup screen immediately (no “Connecting” loop on stale credentials).
+### Optional touch controller
+
+Capacitive-touch versions of the ESP32-2424S012 also use:
+
+| Function    |   GPIO |
+| ----------- | -----: |
+| Touch SDA   | GPIO 4 |
+| Touch SCL   | GPIO 5 |
+| Touch INT   | GPIO 0 |
+| Touch RESET | GPIO 1 |
+
+Plane Radar does not currently use the touchscreen, but these GPIOs should be kept in mind when adding additional hardware.
+
+## Display configuration
+
+Board-specific display settings are defined in:
+
+```text
+include/config.h
+```
+
+The ESP32-2424S012 configuration is:
+
+```cpp
+constexpr gpio_num_t kDisplayPinCs   = GPIO_NUM_10;
+constexpr gpio_num_t kDisplayPinDc   = GPIO_NUM_2;
+constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_7;
+constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_6;
+
+constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_NC;
+constexpr gpio_num_t kDisplayPinBl  = GPIO_NUM_3;
+
+constexpr int kDisplayWidth  = 240;
+constexpr int kDisplayHeight = 240;
+
+constexpr uint32_t kDisplaySpiWriteHz = 40000000;
+constexpr uint32_t kDisplaySpiReadHz  = 20000000;
+
+constexpr bool kDisplayInvert   = true;
+constexpr bool kDisplayRgbOrder = false;
+```
+
+The LovyanGFX device configuration is located in:
+
+```text
+include/hardware/lgfx_config.hpp
+```
+
+The display uses:
+
+* `lgfx::Panel_GC9A01`
+* `SPI2_HOST`
+* SPI mode 0
+* 3-wire SPI enabled
+* automatic DMA channel selection
+* 240×240 panel geometry
+* no hardware LCD reset pin
+* inverted GC9A01 display mode
+* BGR/RGB ordering required by this particular panel
+
+A 40 MHz SPI write clock is used as a stable known-working configuration.
+
+## Backlight
+
+The ESP32-2424S012 LCD backlight is connected to **GPIO 3** and is active HIGH.
+
+The backlight is enabled directly during display initialisation:
+
+```cpp
+pinMode(static_cast<int>(config::kDisplayPinBl), OUTPUT);
+digitalWrite(static_cast<int>(config::kDisplayPinBl), HIGH);
+```
+
+This happens before the GC9A01 is initialised.
+
+The current implementation intentionally does not use LovyanGFX `Light_PWM` or `tft.setBrightness()`.
+
+## Controls
+
+The user button is connected to **GPIO 9** and is active LOW.
+
+| Action                           | Result                                |
+| -------------------------------- | ------------------------------------- |
+| Short press                      | Cycle through radar range presets     |
+| Hold for approximately 3 seconds | Clear configuration and restart setup |
+
+The available range presets are:
+
+* 5 km
+* 10 km
+* 15 km
+* 25 km
+
+The selected range is stored in flash and restored after reboot.
+
+## Wi-Fi setup
+
+When no Wi-Fi configuration exists, the device creates the access point:
+
+```text
+PlaneRadar-Setup
+```
+
+Connect to that network and open the Plane Radar configuration portal.
+
+The default local setup address is:
+
+```text
+plane-radar.local
+```
+
+If mDNS is unavailable, the setup AP can also be reached at:
+
+```text
+192.168.4.1
+```
+
+The portal allows configuration of:
+
+* Wi-Fi credentials
+* Radar latitude
+* Radar longitude
+* Distance units
+* Airport runway display
+
+Settings are stored in non-volatile storage.
+
+After configuration the ESP32 reconnects automatically and starts the radar display.
 
 ## Radar display
 
-### Grid
+The UI shows a circular radar centred on the configured location.
 
-- Dark blue background, subdued green rings and crosshairs
-- White **N / S / E / W** at the bezel; range label on the **east** spoke (ring 3 = ¾ of outer radius)
-- White center dot
+Displayed information can include:
 
-Layout and colors: `include/ui/radar_theme.h`.
+* Nearby aircraft
+* Aircraft heading
+* Callsign
+* Aircraft type
+* Altitude
+* Speed vector
+* Range rings
+* Cardinal directions
+* Major airport runways
 
-### Range presets
+Aircraft outside the main radar ring but still inside the ADS-B query area can appear as indicators around the edge of the screen.
 
-| Ring 3 label | Outer radius (aircraft scale) |
-|------------|-------------------------------|
-| 5 km / 3 mi | ~6.7 km |
-| 10 km / 6 mi | ~13.3 km (default) |
-| 15 km / 9 mi | ~20 km |
-| 25 km / 16 mi | ~33.3 km |
+## ADS-B data
 
-Preset and miles/km choice persist across reboot (`planeradar` NVS namespace).
+Aircraft information is retrieved from **adsb.fi**.
 
-### Runways
+The query location is based on the latitude and longitude entered in the configuration portal.
 
-- Major airports from OurAirports (`large_airport`); all open runway strips in range (helipads excluded)
-- Teal runway lines with one ICAO label per airport (e.g. `KJFK`); toggle in the Wi‑Fi setup portal
-- Update the embedded list: `python3 scripts/build_large_airports.py`
+The search radius scales with the currently selected radar range.
 
-### Aircraft
-
-- **Inside the outer ring** — red heading triangle, magenta speed vector (clipped at the ring), callsign / type / altitude tags
-- **Outside the ring** (still within ADS-B fetch) — small **red dot on the screen rim** at the correct bearing (direction cue; not distance-accurate past the ring)
-- **Tags** — placed toward the **center**: west (left) → tag on the **right** of the symbol; east (right) → tag on the **left**
-
-As range decreases (or aircraft approach), targets move inward; beyond-ring dots become full symbols when they cross the outer ring.
-
-### ADS-B
-
-- Source: `https://opendata.adsb.fi/api/v3/`
-- Fetch radius: `ui::radar::fetchRadiusKm()` — scales with the active preset to roughly the screen edge (so rim dots have data)
-- Poll interval: `kAdsbFetchIntervalMs` (5 s) in `config.h`
-- Ground aircraft hidden by default (`kAdsbShowGroundAircraft`)
+Ground aircraft are hidden by default and can be enabled through the firmware configuration.
 
 ## Configuration
 
-Edit **`include/config.h`** for hardware and behavior:
+Most hardware and firmware defaults are located in:
 
-| Area | Keys / notes |
-|------|----------------|
-| Portal | `kPortalApName`, `kPortalIp`, `kPortalHostname` / `kPortalHostUrl` (mDNS; needs `-DWM_MDNS` in `platformio.ini`) |
-| Wi‑Fi timing | connect attempts, reconnect grace, portal timeout (`0` = no timeout) |
-| BOOT | `kBootPin`, `kBootResetHoldMs`, `kBootTapMinMs` |
-| Display SPI | pins, `kDisplayInvert`, `kDisplayRgbOrder`, `kDisplaySpiWriteHz` |
-| Default location | `kDefaultRadarLat`, `kDefaultRadarLon` (until portal overrides) |
-| ADS-B | `kAdsbFetchIntervalMs`, `kAdsbShowGroundAircraft` |
-
-Range presets: `include/ui/radar_range.h` (`kRangePresets`).
-
-## Project layout
-
+```text
+include/config.h
 ```
+
+Important options include:
+
+| Area            | Configuration                                     |
+| --------------- | ------------------------------------------------- |
+| Wi-Fi portal    | AP name, IP address and mDNS hostname             |
+| Wi-Fi behaviour | Connection attempts and retry timing              |
+| Button          | GPIO and long-press timing                        |
+| Display         | SPI pins, clock speed, colour order and inversion |
+| Backlight       | GPIO 3                                            |
+| Radar location  | Default latitude and longitude                    |
+| ADS-B           | Polling interval and ground-aircraft visibility   |
+
+Radar range presets are defined separately in:
+
+```text
+include/ui/radar_range.h
+```
+
+## Project structure
+
+```text
 include/
   config.h
+
   hardware/
     lgfx_config.hpp
     display.h
     display_font.h
+
   data/
     large_airports.h
+
   ui/
     radar_theme.h
     radar_range.h
     radar_display.h
     runway_overlay.h
     status_screens.h
+
   services/
     wifi_setup.h
     radar_location.h
     adsb_client.h
+
 data/
-  ui_font.vlw              — embedded smooth UI font (Noto Sans Bold)
+  ui_font.vlw
+
 scripts/
   build_large_airports.py
+
 src/
   main.cpp
+
   data/
     large_airports_data.cpp
+
   hardware/
   ui/
   services/
 ```
 
-## Wiring (GC9A01 ↔ ESP32-C3 Super Mini)
+## Building
 
-| Display | ESP32-C3 |
-|---------|----------|
-| VCC | 3V3 |
-| GND | GND |
-| RST | GPIO **0** |
-| CS | GPIO **1** |
-| DC | GPIO **10** |
-| SDA (MOSI) | GPIO **3** |
-| SCL (SCLK) | GPIO **4** |
-| BOOT (user) | GPIO **9** |
+The firmware uses PlatformIO.
 
-## Build
+Build and upload with:
 
 ```bash
 pio run -t upload
+```
+
+Open the serial monitor with:
+
+```bash
 pio device monitor
 ```
 
-- PlatformIO env: **`supermini`**
-- Serial: **115200** baud
-- USB CDC on boot enabled in `platformio.ini` for the Super Mini
+Serial output runs at:
 
-### Web-flashable release image
-
-Single `.bin` for [esptool-js](https://espressif.github.io/esptool-js/) and similar tools (ESP32-C3, 4 MB, flash at **0x0**):
-
-```bash
-chmod +x scripts/merge-firmware.sh   # once
-./scripts/merge-firmware.sh
+```text
+115200 baud
 ```
 
-Writes `release/plane-radar-merged.bin`. Skip rebuild if firmware is already built:
+The existing `supermini` PlatformIO environment can continue to be used because both the original target and the ESP32-2424S012 use the ESP32-C3.
 
-```bash
-./scripts/merge-firmware.sh --no-build
+## Flashing problems
+
+If PlatformIO cannot connect to the ESP32-C3, manually enter download mode:
+
+1. Hold the BOOT button.
+2. Press or trigger RESET.
+3. Release BOOT.
+4. Retry the upload.
+
+Depending on the ESP32-2424S012 revision and USB connection, using a known-good USB data cable may also be necessary.
+
+## Display troubleshooting
+
+### Backlight is completely off
+
+Check that GPIO 3 is configured as an output and driven HIGH:
+
+```cpp
+pinMode(3, OUTPUT);
+digitalWrite(3, HIGH);
 ```
 
-Or via PlatformIO only (output: `.pio/build/supermini/firmware-merged.bin`):
+If the backlight does not illuminate, troubleshoot the backlight or board power before investigating SPI communication.
 
-```bash
-pio run -e supermini
-pio run -t merge -e supermini
+### Backlight works but the display remains black
+
+Verify the following LCD configuration:
+
+```text
+SCLK  = GPIO 6
+MOSI  = GPIO 7
+DC    = GPIO 2
+CS    = GPIO 10
+RST   = -1
+BL    = GPIO 3
 ```
 
-Put the board in download mode (hold **BOOT**, tap **RESET**), then flash with Chrome/Edge over USB.
+Also verify:
 
-### CI and releases (GitHub Actions)
-
-| Workflow | When | Output |
-|----------|------|--------|
-| [Build](.github/workflows/build.yml) | Push / PR to `main` | Artifact `plane-radar-supermini` (merged + split `.bin` files, ~90 days) |
-| [Release](.github/workflows/release.yml) | Git tag `v*` (e.g. `v1.0.0`) | GitHub Release asset `plane-radar-v1.0.0.bin` + `.sha256` |
-
-To ship a version users can download:
-
-```bash
-git tag v1.0.0
-git push origin v1.0.0
+```text
+SPI host     = SPI2_HOST
+SPI mode     = 0
+SPI 3-wire   = true
+invert       = true
+rgb_order    = false
+resolution   = 240 × 240
 ```
 
-The release workflow builds firmware in CI and attaches the merged image to the release. Download from **Releases** on GitHub, then flash at **0x0** (ESP32-C3, 4 MB).
+If necessary, temporarily reduce the SPI write speed to help diagnose communication problems.
+
+For example:
+
+```cpp
+constexpr uint32_t kDisplaySpiWriteHz = 10000000;
+```
+
+Once the display works reliably, restore the known-working 40 MHz value.
+
+### Wrong colours
+
+Verify:
+
+```cpp
+constexpr bool kDisplayInvert   = true;
+constexpr bool kDisplayRgbOrder = false;
+```
+
+Incorrect RGB/BGR ordering can make the interface appear with incorrect colours even though the display otherwise works normally.
+
+### Test the LCD independently
+
+When diagnosing display problems, temporarily replace the normal UI with:
+
+```cpp
+tft.init();
+tft.fillScreen(TFT_RED);
+```
+
+If the panel becomes red, the GC9A01 and SPI configuration are working and the problem is likely elsewhere in the UI or application startup.
+
+Remove this test once the display is confirmed working.
 
 ## Dependencies
 
-- [LovyanGFX](https://github.com/lovyan03/LovyanGFX)
-- [WiFiManager](https://github.com/tzapu/WiFiManager)
-- [ArduinoJson](https://github.com/bblanchon/ArduinoJson)
+The project uses:
+
+* LovyanGFX
+* WiFiManager
+* ArduinoJson
+
+## Changes from the original hardware configuration
+
+The original ESP32-Plane-Radar project targets an ESP32-C3 Super Mini connected to a separate GC9A01 display.
+
+This version targets the **ESP32-2424S012**, where the ESP32-C3 and GC9A01 are on the same board.
+
+The main hardware changes are:
+
+| Function      | Original Super Mini configuration | ESP32-2424S012 |
+| ------------- | --------------------------------: | -------------: |
+| LCD RESET     |                            GPIO 0 |  Not connected |
+| LCD CS        |                            GPIO 1 |        GPIO 10 |
+| LCD DC        |                           GPIO 10 |         GPIO 2 |
+| LCD MOSI      |                            GPIO 3 |         GPIO 7 |
+| LCD SCLK      |                            GPIO 4 |         GPIO 6 |
+| LCD backlight |            External / unspecified |         GPIO 3 |
+| RGB order     |                            `true` |        `false` |
+
+The ESP32-2424S012 also requires GPIO 3 to be explicitly enabled for the LCD backlight.
+
+## Credits
+
+Based on the open-source **ESP32-Plane-Radar** project by MatixYo.
+
+ESP32-2424S012 display support was adapted for the board's integrated GC9A01 display and ESP32-C3 pin mapping.
+
+## License
+
+Retain the original ESP32-Plane-Radar project's license and copyright notices when distributing modified versions.
