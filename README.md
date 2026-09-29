@@ -4,7 +4,14 @@
 
 **3D printed case (STL + assembly):** [MakerWorld](https://makerworld.com/en/models/2872376-esp32-plane-radar-live-ads-b-on-a-round-display#profileId-3207083) · **Firmware:** [Releases](https://github.com/MatixYo/ESP32-Plane-Radar/releases)
 
-Firmware for an **ESP32-C3 Super Mini** and a **1.28″ round GC9A01** display (240×240). Shows a circular **ADS-B radar** around your configured location, with **WiFiManager** for first-time setup.
+Firmware for a **1.28″ round GC9A01** display (240×240) on the **ESP32-C3**. Shows a circular **ADS-B radar** around your configured location, with **WiFiManager** for first-time setup.
+
+**Supported boards** (see [Boards](#boards)):
+
+- **ESP32-C3 Super Mini** + a separately wired GC9A01 panel (default)
+- **Sunton/JCZN ESP32-2424S012** — integrated 1.28″ round GC9A01 + CST816 touch board
+
+Pick the board at build time (PlatformIO env) and/or switch it at runtime from the Wi‑Fi setup portal.
 
 ## What it does
 
@@ -44,6 +51,7 @@ The same portal runs on the setup AP and on the device’s LAN IP while connecte
 | **Latitude / Longitude** | Radar center and ADS-B query position (defaults in `config.h` until set) |
 | **Display distances in miles** | Ring scale label in **mi** instead of **km** (e.g. `6mi` vs `10km`) |
 | **Show airport runways** | Major-airport runway overlay on the radar (off to hide) |
+| **Board** | Display board in use (Super Mini / ESP32-2424S012); reboots to apply |
 
 After a reset, the device reboots and shows the setup screen immediately (no “Connecting” loop on stale credentials).
 
@@ -98,7 +106,8 @@ Edit **`include/config.h`** for hardware and behavior:
 | Portal | `kPortalApName`, `kPortalIp`, `kPortalHostname` / `kPortalHostUrl` (mDNS; needs `-DWM_MDNS` in `platformio.ini`) |
 | Wi‑Fi timing | connect attempts, reconnect grace, portal timeout (`0` = no timeout) |
 | BOOT | `kBootPin`, `kBootResetHoldMs`, `kBootTapMinMs` |
-| Display SPI | pins, `kDisplayInvert`, `kDisplayRgbOrder`, `kDisplaySpiWriteHz` |
+| Display | `kDisplayInvert`, `kDisplaySpiWriteHz` in `config.h`; per-board pins and color order in `include/hardware/board.h` |
+| Boards | `include/hardware/board.h` (`kBoards` table, `Board` enum); add a board by extending both |
 | Default location | `kDefaultRadarLat`, `kDefaultRadarLon` (until portal overrides) |
 | ADS-B | `kAdsbFetchIntervalMs`, `kAdsbShowGroundAircraft` |
 
@@ -110,6 +119,7 @@ Range presets: `include/ui/radar_range.h` (`kRangePresets`).
 include/
   config.h
   hardware/
+    board.h                 — board registry (pins per board, runtime select)
     lgfx_config.hpp
     display.h
     display_font.h
@@ -138,7 +148,16 @@ src/
   services/
 ```
 
-## Wiring (GC9A01 ↔ ESP32-C3 Super Mini)
+## Boards
+
+The display wiring per board lives in [`include/hardware/board.h`](include/hardware/board.h). Select a board two ways:
+
+- **Compile time** — pick the PlatformIO env (sets the default): `supermini` or `esp32-2424s012` (see [Build](#build)).
+- **Runtime** — choose the board in the Wi‑Fi setup portal (**Board** dropdown). The choice is saved to NVS and applied on the next boot, so one firmware image can run on either board.
+
+> On first boot the display uses the build-time default. If you flash the “wrong” env, the screen may stay blank until you pick the correct board in the portal (connect to the `PlaneRadar-Setup` AP and open the page), then it reboots.
+
+### ESP32-C3 Super Mini (separately wired GC9A01)
 
 | Display | ESP32-C3 |
 |---------|----------|
@@ -151,16 +170,26 @@ src/
 | SCL (SCLK) | GPIO **4** |
 | BOOT (user) | GPIO **9** |
 
+### Sunton/JCZN ESP32-2424S012 (integrated)
+
+Integrated board — no wiring needed. Display is fixed to: SCLK **6**, MOSI **7**, DC **2**, CS **10**, RST **not wired**, backlight **GPIO 3** (active high), panel color order **BGR**. (Touch/IMU are not used by this firmware.)
+
 ## Build
 
 ```bash
-pio run -t upload
+# ESP32-C3 Super Mini (default)
+pio run -e supermini -t upload
+
+# Sunton/JCZN ESP32-2424S012
+pio run -e esp32-2424s012 -t upload
+
 pio device monitor
 ```
 
-- PlatformIO env: **`supermini`**
+- PlatformIO envs: **`supermini`** (default) and **`esp32-2424s012`**
 - Serial: **115200** baud
-- USB CDC on boot enabled in `platformio.ini` for the Super Mini
+- USB CDC on boot enabled in `platformio.ini` (native USB on both boards)
+- To flash a board that is boot-looping or busy, enter download mode first (hold **BOOT**, tap **RESET** / replug)
 
 ### Web-flashable release image
 

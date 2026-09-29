@@ -15,6 +15,7 @@
 #endif
 
 #include "config.h"
+#include "hardware/board.h"
 #include "services/radar_location.h"
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
@@ -85,6 +86,33 @@ char s_runways_checkbox_attrs[32] = "type=\"checkbox\"";
 WiFiManagerParameter s_param_runways("show_runways", "Show airport runways", "T", 2,
                                      s_runways_checkbox_attrs, WFM_LABEL_AFTER);
 
+// Board selector. Custom-HTML-only param renders a <select name="board">; the
+// posted value is read back directly from the web server (see onPortalParamsSaved).
+char s_board_select_html[320] = "";
+WiFiManagerParameter s_param_board(s_board_select_html);
+
+// Set when the board changes via the portal; wifiLoop reboots to re-init the
+// display with the new pins after the HTTP response has been sent.
+unsigned long s_reboot_at_ms = 0;
+
+void buildBoardSelectHtml() {
+  const uint8_t cur = static_cast<uint8_t>(hardware::board::active());
+  int n = snprintf(s_board_select_html, sizeof(s_board_select_html),
+                   "<br/><label for='board'>Board</label>"
+                   "<select name='board' id='board'>");
+  for (uint8_t i = 0; i < hardware::board::kBoardCount && n > 0 &&
+                      n < static_cast<int>(sizeof(s_board_select_html));
+       ++i) {
+    n += snprintf(s_board_select_html + n, sizeof(s_board_select_html) - n,
+                  "<option value='%u'%s>%s</option>", i,
+                  i == cur ? " selected" : "",
+                  hardware::board::name(static_cast<hardware::board::Board>(i)));
+  }
+  if (n > 0 && n < static_cast<int>(sizeof(s_board_select_html))) {
+    snprintf(s_board_select_html + n, sizeof(s_board_select_html) - n, "</select>");
+  }
+}
+
 void refreshPortalParamDefaults() {
   char lat_buf[kCoordParamLen + 1];
   char lon_buf[kCoordParamLen + 1];
@@ -98,6 +126,29 @@ void refreshPortalParamDefaults() {
   snprintf(s_runways_checkbox_attrs, sizeof(s_runways_checkbox_attrs),
            "type=\"checkbox\"%s", ui::radar::showRunways() ? " checked" : "");
   s_param_runways.setValue("T", 2);
+  buildBoardSelectHtml();
+}
+
+void saveBoardFromPortal() {
+  if (!s_wm.server) {
+    return;
+  }
+  const String value = s_wm.server->arg("board");
+  if (value.length() == 0) {
+    return;
+  }
+  const long sel = value.toInt();
+  if (!hardware::board::isValidIndex(sel)) {
+    return;
+  }
+  const auto chosen = static_cast<hardware::board::Board>(sel);
+  if (chosen == hardware::board::active()) {
+    return;
+  }
+  hardware::board::setActive(chosen);
+  Serial.printf("Board set to %s — rebooting to apply\n",
+                hardware::board::name(chosen));
+  s_reboot_at_ms = millis() + 1200;  // let the HTTP response flush first
 }
 
 void onPortalParamsSaved() {
@@ -107,6 +158,7 @@ void onPortalParamsSaved() {
   }
   ui::radar::saveMilesFromPortal(s_param_miles.getValue());
   ui::radar::saveRunwaysFromPortal(s_param_runways.getValue());
+  saveBoardFromPortal();
 }
 
 void attachPortalParams(WiFiManager& wm) {
@@ -115,6 +167,7 @@ void attachPortalParams(WiFiManager& wm) {
   wm.addParameter(&s_param_lon);
   wm.addParameter(&s_param_miles);
   wm.addParameter(&s_param_runways);
+  wm.addParameter(&s_param_board);
   wm.setSaveParamsCallback(onPortalParamsSaved);
 }
 
@@ -436,6 +489,10 @@ bool wifiReconnect() {
 }
 
 void wifiLoop() {
+  if (s_reboot_at_ms != 0 && millis() >= s_reboot_at_ms) {
+    Serial.println("Rebooting to apply board change...");
+    esp_restart();
+  }
   ensureWifiManager();
   if (wifiLinkUp()) {
     if (!s_wm.getWebPortalActive() && !s_wm.getConfigPortalActive()) {
