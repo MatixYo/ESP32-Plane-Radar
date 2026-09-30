@@ -1,6 +1,5 @@
 #include "ui/radar_display.h"
 
-#include <Arduino.h>
 #include <lgfx/v1/lgfx_fonts.hpp>
 
 #include <algorithm>
@@ -15,6 +14,8 @@
 #include "ui/radar_range.h"
 #include "ui/radar_theme.h"
 #include "ui/runway_overlay.h"
+
+namespace fonts = lgfx::v1::fonts;
 
 namespace ui {
 namespace radar {
@@ -199,44 +200,14 @@ void initPalette() {
 }
 
 constexpr float kKmPerDeg = 111.0f;
-constexpr float kDegToRad = 3.14159265f / 180.0f;
 
 void offsetKmFromCenter(float lat, float lon, float* dx_km, float* dy_km,
                         float* dist_km) {
-  // Longitude degrees shrink toward the poles; scale by cos(latitude) so
-  // east-west distance isn't overstated away from the equator.
-  const float center_lat_rad =
-      static_cast<float>(services::location::lat()) * kDegToRad;
-  *dx_km = static_cast<float>(lon - services::location::lon()) * kKmPerDeg *
-           cosf(center_lat_rad);
+  *dx_km =
+      static_cast<float>(lon - services::location::lon()) * kKmPerDeg;
   *dy_km =
       static_cast<float>(lat - services::location::lat()) * kKmPerDeg;
   *dist_km = sqrtf((*dx_km) * (*dx_km) + (*dy_km) * (*dy_km));
-}
-
-/**
- * Dead-reckon an aircraft's position from its last-fetched fix along its ground
- * track, so it moves smoothly between ADS-B updates. Uses the same flat
- * 1° ≈ 111 km projection as offsetKmFromCenter(), so it round-trips exactly.
- */
-void extrapolatedLatLon(const services::adsb::Aircraft& plane,
-                        unsigned long base_ms, float* lat, float* lon) {
-  *lat = plane.lat;
-  *lon = plane.lon;
-  if (base_ms == 0 || plane.gs_knots <= 0.0f) {
-    return;
-  }
-  // Elapsed since the fix was measured = time since fetch + the fix's own age.
-  const unsigned long elapsed_ms = (millis() - base_ms) + plane.pos_age_ms;
-  const float elapsed_h = static_cast<float>(elapsed_ms) / 3600000.0f;
-  const float dist_km = plane.gs_knots * 1.852f * elapsed_h;  // knots -> km
-  if (dist_km <= 0.0f) {
-    return;
-  }
-  constexpr float kDegToRad = 0.01745329252f;
-  const float rad = plane.track_deg * kDegToRad;  // track: 0 = N, 90 = E
-  *lat = plane.lat + (dist_km * cosf(rad)) / kKmPerDeg;
-  *lon = plane.lon + (dist_km * sinf(rad)) / kKmPerDeg;
 }
 
 float innerRingMaxKm() {
@@ -437,7 +408,7 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
 
   const int line_h = s_draw->fontHeight();
   const int block_w = measureTagBlockWidth(plane);
-  const int block_h = line_h;
+  const int block_h = line_h * 3;
   int ly = y - block_h / 2;
 
   const int symbol_half =
@@ -459,7 +430,19 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   if (plane.callsign[0] != '\0') {
     s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
     s_draw->drawString(plane.callsign, anchor_x, ly);
-}
+  }
+  ly += line_h;
+
+  if (plane.type[0] != '\0') {
+    s_draw->setTextColor(radar::kColorTagType, radar::kColorBackground);
+    s_draw->drawString(plane.type, anchor_x, ly);
+  }
+  ly += line_h;
+
+  if (plane.alt[0] != '\0') {
+    s_draw->setTextColor(radar::kColorTagAltitude, radar::kColorBackground);
+    s_draw->drawString(plane.alt, anchor_x, ly);
+  }
 }
 
 struct AircraftDrawItem {
@@ -502,11 +485,8 @@ void sortBeyondDotsFarFirst(BeyondDotDrawItem* items, size_t count) {
 void drawAircraft() {
   initLabelMetrics();
 
-  // Snapshot under the adsb lock (the fetch may run on another thread).
-  static services::adsb::Aircraft planes[services::adsb::kMaxAircraft];
-  unsigned long base_ms = 0;
-  const size_t n = services::adsb::snapshotAircraft(
-      planes, services::adsb::kMaxAircraft, &base_ms);
+  const size_t n = services::adsb::aircraftCount();
+  const services::adsb::Aircraft* planes = services::adsb::aircraftList();
 
   AircraftDrawItem items[services::adsb::kMaxAircraft];
   BeyondDotDrawItem dots[services::adsb::kMaxAircraft];
@@ -514,20 +494,15 @@ void drawAircraft() {
   size_t dot_count = 0;
 
   for (size_t i = 0; i < n; ++i) {
-    // Dead-reckoned position for smooth motion between fetches.
-    float lat = 0.0f;
-    float lon = 0.0f;
-    extrapolatedLatLon(planes[i], base_ms, &lat, &lon);
-
     float dx_km = 0.0f;
     float dy_km = 0.0f;
     float dist_km = 0.0f;
-    offsetKmFromCenter(lat, lon, &dx_km, &dy_km, &dist_km);
+    offsetKmFromCenter(planes[i].lat, planes[i].lon, &dx_km, &dy_km, &dist_km);
 
     if (isInsideOuterRingKm(dist_km)) {
       int x = 0;
       int y = 0;
-      latLonToScreen(lat, lon, &x, &y);
+      latLonToScreen(planes[i].lat, planes[i].lon, &x, &y);
       items[draw_count].index = i;
       items[draw_count].x = x;
       items[draw_count].y = y;
@@ -538,7 +513,8 @@ void drawAircraft() {
 
     int dot_x = 0;
     int dot_y = 0;
-    if (!beyondRingEdgeDotFromLatLon(lat, lon, &dot_x, &dot_y)) {
+    if (!beyondRingEdgeDotFromLatLon(planes[i].lat, planes[i].lon, &dot_x,
+                                     &dot_y)) {
       continue;
     }
     dots[dot_count].x = dot_x;
@@ -684,7 +660,7 @@ bool ensureFrameSprite() {
   if (s_frame_ready) {
     return true;
   }
-  s_frame.setColorDepth(lgfx::color_depth_t::rgb332_1Byte);
+  s_frame.setColorDepth(16);
   if (!s_frame.createSprite(radar::kSize, radar::kSize)) {
     Serial.println("radar: frame sprite alloc failed");
     return false;
