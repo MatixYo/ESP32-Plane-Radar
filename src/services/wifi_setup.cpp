@@ -15,6 +15,7 @@
 #endif
 
 #include "config.h"
+#include "services/mqtt_config.h"
 #include "services/radar_location.h"
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
@@ -71,6 +72,9 @@ bool wifiLinkUp();
 constexpr int kCoordParamLen = 20;
 constexpr char kCoordInputAttrs[] =
     " type=\"number\" step=\"0.000001\"";
+/** Max chars of a 16-bit port; must match the parameter's constructor length,
+ *  because setValue() reallocates when the two disagree. */
+constexpr int kPortParamLen = 6;
 
 WiFiManagerParameter s_param_lat("radar_lat", "Latitude (deg)", "0",
                                 kCoordParamLen, kCoordInputAttrs);
@@ -85,6 +89,28 @@ char s_runways_checkbox_attrs[32] = "type=\"checkbox\"";
 WiFiManagerParameter s_param_runways("show_runways", "Show airport runways", "T", 2,
                                      s_runways_checkbox_attrs, WFM_LABEL_AFTER);
 
+// MQTT / Home Assistant. Every text field starts EMPTY on purpose: the firmware
+// ships no broker address, and an empty host keeps MQTT inert. The hints are
+// placeholders only, never pre-filled values.
+char s_mqtt_on_checkbox_attrs[32] = "type=\"checkbox\"";
+WiFiManagerParameter s_param_mqtt_on("mqtt_on", "Publish to Home Assistant (MQTT)", "T", 2,
+                                     s_mqtt_on_checkbox_attrs, WFM_LABEL_AFTER);
+WiFiManagerParameter s_param_mqtt_host("mqtt_host", "MQTT broker host", "", 64,
+                                       " type=\"text\" placeholder=\"e.g. 192.168.0.10\"");
+WiFiManagerParameter s_param_mqtt_port("mqtt_port", "MQTT broker port", "", kPortParamLen,
+                                       " type=\"number\" min=\"1\" max=\"65535\""
+                                       " placeholder=\"1883\"");
+WiFiManagerParameter s_param_mqtt_user("mqtt_user", "MQTT username", "", 32,
+                                       " type=\"text\" placeholder=\"mqtt user\"");
+WiFiManagerParameter s_param_mqtt_pass("mqtt_pass", "MQTT password", "", 96,
+                                       " type=\"password\" placeholder=\"broker password\"");
+WiFiManagerParameter s_param_mqtt_topic("mqtt_topic", "MQTT base topic", "", 40,
+                                        " type=\"text\" placeholder=\"planeradar/&lt;mac&gt;\"");
+WiFiManagerParameter s_param_mqtt_prefix("mqtt_prefix", "HA discovery prefix", "", 32,
+                                         " type=\"text\" placeholder=\"homeassistant\"");
+WiFiManagerParameter s_param_mqtt_name("mqtt_name", "Device name in Home Assistant", "", 40,
+                                       " type=\"text\" placeholder=\"Plane Radar\"");
+
 void refreshPortalParamValues() {
   char lat_buf[kCoordParamLen + 1];
   char lon_buf[kCoordParamLen + 1];
@@ -98,6 +124,27 @@ void refreshPortalParamValues() {
   snprintf(s_runways_checkbox_attrs, sizeof(s_runways_checkbox_attrs),
            "type=\"checkbox\"%s", ui::radar::showRunways() ? " checked" : "");
   s_param_runways.setValue("T", 2);
+
+  services::mqtt::MqttConfig mqtt{};
+  services::mqtt::loadConfig(mqtt);
+  snprintf(s_mqtt_on_checkbox_attrs, sizeof(s_mqtt_on_checkbox_attrs),
+           "type=\"checkbox\"%s", mqtt.enabled ? " checked" : "");
+  s_param_mqtt_on.setValue("T", 2);
+  s_param_mqtt_host.setValue(mqtt.host, services::mqtt::kBrokerHostLen);
+  // The port is only shown when it differs from the default: an untouched field
+  // stays empty (the placeholder carries the suggestion), like every other field.
+  char port_buf[8];
+  if (mqtt.port != config::kMqttDefaultPort) {
+    snprintf(port_buf, sizeof(port_buf), "%u", static_cast<unsigned>(mqtt.port));
+  } else {
+    port_buf[0] = '\0';
+  }
+  s_param_mqtt_port.setValue(port_buf, kPortParamLen);
+  s_param_mqtt_user.setValue(mqtt.user, services::mqtt::kBrokerUserLen);
+  s_param_mqtt_pass.setValue(mqtt.pass, services::mqtt::kBrokerPassLen);
+  s_param_mqtt_topic.setValue(mqtt.topic, services::mqtt::kTopicLen);
+  s_param_mqtt_prefix.setValue(mqtt.prefix, services::mqtt::kPrefixLen);
+  s_param_mqtt_name.setValue(mqtt.name, services::mqtt::kDeviceNameLen);
 }
 
 void onPortalParamsSaved() {
@@ -109,6 +156,11 @@ void onPortalParamsSaved() {
   ui::radar::saveRunwaysFromPortal(s_param_runways.getValue());
 
   refreshPortalParamValues();
+  services::mqtt::saveFromPortal(
+      s_param_mqtt_host.getValue(), s_param_mqtt_port.getValue(),
+      s_param_mqtt_user.getValue(), s_param_mqtt_pass.getValue(),
+      s_param_mqtt_topic.getValue(), s_param_mqtt_prefix.getValue(),
+      s_param_mqtt_name.getValue(), s_param_mqtt_on.getValue());
 }
 
 void attachPortalParams(WiFiManager& wm) {
@@ -117,6 +169,14 @@ void attachPortalParams(WiFiManager& wm) {
   wm.addParameter(&s_param_lon);
   wm.addParameter(&s_param_miles);
   wm.addParameter(&s_param_runways);
+  wm.addParameter(&s_param_mqtt_on);
+  wm.addParameter(&s_param_mqtt_host);
+  wm.addParameter(&s_param_mqtt_port);
+  wm.addParameter(&s_param_mqtt_user);
+  wm.addParameter(&s_param_mqtt_pass);
+  wm.addParameter(&s_param_mqtt_topic);
+  wm.addParameter(&s_param_mqtt_prefix);
+  wm.addParameter(&s_param_mqtt_name);
   wm.setSaveParamsCallback(onPortalParamsSaved);
 }
 
@@ -194,7 +254,8 @@ void resetWifiCredentials() {
   eraseWifiCredentials();
   services::location::clear();
   ui::radar::unitsReset();
-  Serial.println("WiFi credentials, location, and units cleared");
+  services::mqtt::clearConfig();
+  Serial.println("WiFi credentials, location, units, and MQTT config cleared");
 }
 
 void onConfigPortalApStarted(WiFiManager*) {

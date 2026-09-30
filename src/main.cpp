@@ -8,6 +8,7 @@
 #include "config.h"
 #include "hardware/display.h"
 #include "services/adsb_client.h"
+#include "services/mqtt_client.h"
 #include "services/radar_location.h"
 #include "services/wifi_setup.h"
 #include "ui/radar_display.h"
@@ -80,6 +81,7 @@ void setup() {
   services::location::init();
   ui::radar::rangeInit();
   services::adsb::init();
+  services::mqtt::init();
 
   if (wifiSetupConnect()) {
     showRadarIfConnected();
@@ -93,6 +95,7 @@ void setup() {
 void loop() {
   handleBootButton();
   wifiLoop();
+  services::mqtt::loop();
 
   if (WiFi.status() != WL_CONNECTED) {
     if (g_radar_visible) {

@@ -1,5 +1,7 @@
 #include "services/adsb_client.h"
 
+#include "services/nearest_aircraft.h"
+
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 
@@ -27,9 +29,20 @@ size_t s_aircraft_count = 0;
 unsigned long s_last_update_ms = 0;
 PollFn s_poll_fn = nullptr;
 SemaphoreHandle_t s_mutex = nullptr;
+// Set for the whole of fetchUpdate(), cleared on every return path, so the MQTT
+// client can leave the shared Wi-Fi stack alone while a fetch is in flight.
+volatile bool s_fetch_active = false;
+// Nearest aircraft as of the last fetch, for the MQTT telemetry.
+NearestAircraft s_nearest{};
+
+/** Marks the fetch in flight and guarantees the clear on any early return. */
+struct FetchInProgressGuard {
+  FetchInProgressGuard() { s_fetch_active = true; }
+  ~FetchInProgressGuard() { s_fetch_active = false; }
+};
 
 /** Publish parsed aircraft to the shared buffer atomically. */
-void publish(const Aircraft* src, size_t count) {
+void publish(const Aircraft* src, size_t count, double lat0, double lon0) {
   if (s_mutex != nullptr) {
     xSemaphoreTake(s_mutex, portMAX_DELAY);
   }
@@ -38,6 +51,10 @@ void publish(const Aircraft* src, size_t count) {
   }
   s_aircraft_count = count;
   s_last_update_ms = millis();  // base time for dead-reckoning
+  // Computed here, where the list is already under the lock: the MQTT task used
+  // to do it from a copy of the list, and that 3.3 KB malloc per publish was
+  // what starved the TLS handshake.
+  s_nearest = findNearest(s_aircraft, count, lat0, lon0);
   if (s_mutex != nullptr) {
     xSemaphoreGive(s_mutex);
   }
@@ -257,6 +274,10 @@ const Aircraft* aircraftList() { return s_aircraft; }
 
 unsigned long lastUpdateMs() { return s_last_update_ms; }
 
+const NearestAircraft& nearest() { return s_nearest; }
+
+bool fetchInProgress() { return s_fetch_active; }
+
 size_t snapshotAircraft(Aircraft* out, size_t max_out,
                         unsigned long* out_last_update_ms) {
   if (s_mutex != nullptr) {
@@ -277,6 +298,7 @@ size_t snapshotAircraft(Aircraft* out, size_t max_out,
 }
 
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
+  const FetchInProgressGuard fetch_guard;
   const float dist_nm = kmToNauticalMiles(fetch_radius_km);
 
   String url = kApiBase;
@@ -296,14 +318,25 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     f[key] = true;
   }
 
-  WiFiClientSecure client;
+  // Persistent across polls, and the connection stays alive between them. The
+  // TLS handshake costs ~1 s of CPU on this chip (measured: 899-1140 ms on the
+  // device against 10 ms for the same handshake from a LAN host), so it has to be
+  // paid once. Reuse requires BOTH objects to outlive this call: HTTPClient's
+  // destructor calls _client->stop() without consulting _reuse, so a per-call
+  // instance silently tore the session down on return -- which is what made
+  // mbedtls_ssl_setup(), allocating two 16 KB record buffers every poll, fail as
+  // soon as the display and the MQTT client had taken the heap.
+  static WiFiClientSecure client;
+  static HTTPClient http;
   client.setInsecure();
 
-  HTTPClient http;
   if (!http.begin(client, url)) {
     Serial.println("adsb: http.begin failed");
     return false;
   }
+  // Only with this does HTTPClient::disconnect() keep the socket open instead of
+  // calling _client->stop(): end() consults _reuse, the destructor does not.
+  http.setReuse(true);
 
   // HTTPClient only records Transfer-Encoding in the collected headers when
   // it is asked for up front; _transferEncoding itself is private.
@@ -390,7 +423,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     }
   }
 
-  publish(parsed, n);
+  publish(parsed, n, center_lat, center_lon);
   Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
   return true;
 }

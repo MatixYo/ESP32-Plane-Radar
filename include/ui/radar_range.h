@@ -38,6 +38,12 @@ constexpr size_t kRangePresetCount =
 void rangeInit();
 /** Cycle preset and save to flash. */
 void rangeNext();
+/** Select a preset by index (clamped); persists. Used by the MQTT command path. */
+void rangeSetIndex(uint8_t index);
+/** Set distance units; persists. Used by the MQTT command path. */
+void setUseMiles(bool miles);
+/** Set runway overlay; persists. Used by the MQTT command path. */
+void setShowRunways(bool show);
 const RangePreset& rangeCurrent();
 uint8_t rangeIndex();
 /** ADSB fetch radius (km): scaled to screen edge so beyond-ring dots have data. */

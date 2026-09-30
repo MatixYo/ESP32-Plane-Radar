@@ -22,6 +22,8 @@ struct Aircraft {
 
 constexpr size_t kMaxAircraft = 64;
 
+struct NearestAircraft;
+
 /** Create the internal lock. Call once before any fetch/snapshot. */
 void init();
 
@@ -42,6 +44,21 @@ const Aircraft* aircraftList();
  * newer positions from track_deg/gs_knots and the elapsed time.
  */
 unsigned long lastUpdateMs();
+
+/**
+ * Closest aircraft as of the last successful fetch, computed by the fetch task
+ * from the list it had just parsed. Callers (MQTT telemetry) read this instead
+ * of copying the list: the copy cost 3.3 KB of heap per publish and starved the
+ * TLS handshake. valid=false before the first fetch.
+ */
+const NearestAircraft& nearest();
+
+/**
+ * True while a fetch is in flight. Set on entry to fetchUpdate() and cleared on
+ * every exit path. A plain volatile bool is enough: the flag is advisory, so a
+ * stale read only costs one frame.
+ */
+bool fetchInProgress();
 
 /** Hook invoked during long HTTP I/O (e.g. wifiLoop). Optional. */
 using PollFn = void (*)();
