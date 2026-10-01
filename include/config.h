@@ -29,12 +29,23 @@ constexpr unsigned long kBootResetHoldMs = 3000UL;
 /** Ignore BOOT taps shorter than this (debounce). */
 constexpr unsigned long kBootTapMinMs = 40UL;
 
+#if defined(DISPLAY_TARGET_SUPERMINI)
 // --- Display: GC9A01 1.28" round 240×240 (SPI) ---
+#pragma message("Using configuration for DISPLAY_TARGET_SUPERMINI")
 constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_0;
 constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_1;
 constexpr gpio_num_t kDisplayPinDc = GPIO_NUM_10;
 constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_3;  // display SDA
 constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_4;  // display SCL
+#elif defined(DISPLAY_TARGET_SEEED_XIAO)
+// --- Display: 1.28" round 240×240 XIAO Round Display from SeeedStudio ---
+#pragma message("Using configuration for DISPLAY_TARGET_SEEED_XIAO")
+constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_NC;   // not exposed on xiao round display
+constexpr gpio_num_t kDisplayPinCs  = GPIO_NUM_3;    // D1/GPIO 3
+constexpr gpio_num_t kDisplayPinDc  = GPIO_NUM_5;    // D3/GPIO 5
+constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_10;  // XIAO SPI MOSI
+constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_8;   // XIAO SPI SCK
+#endif
 
 constexpr int kDisplayWidth = 240;
 constexpr int kDisplayHeight = 240;
