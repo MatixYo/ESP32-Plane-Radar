@@ -44,6 +44,15 @@ The same portal runs on the setup AP and on the device’s LAN IP while connecte
 | **Latitude / Longitude** | Radar center and ADS-B query position (defaults in `config.h` until set) |
 | **Display distances in miles** | Ring scale label in **mi** instead of **km** (e.g. `6mi` vs `10km`) |
 | **Show airport runways** | Major-airport runway overlay on the radar (off to hide) |
+| **Publish to Home Assistant (MQTT)** | Master switch. **Off by default**: with no broker host the radar never tries to connect |
+| **MQTT broker host / port** | Broker address; port empty = `1883`. Plain TCP only (see below) |
+| **MQTT username / password** | Broker credentials, stored in NVS. Sent only to the broker |
+| **MQTT base topic** | Empty = `planeradar/<chip-id>`. Two radars need two different topics |
+| **HA discovery prefix** | Empty = `homeassistant`. Change it only if your HA uses a custom one |
+| **Device name in Home Assistant** | Empty = `Plane Radar` |
+
+Every MQTT text field starts **empty** on purpose: the firmware ships no broker address, and the
+hint is shown as a placeholder, never as a pre-filled value.
 
 After a reset, the device reboots and shows the setup screen immediately (no “Connecting” loop on stale credentials).
 
@@ -101,8 +110,43 @@ Edit **`include/config.h`** for hardware and behavior:
 | Display SPI | pins, `kDisplayInvert`, `kDisplayRgbOrder`, `kDisplaySpiWriteHz` |
 | Default location | `kDefaultRadarLat`, `kDefaultRadarLon` (until portal overrides) |
 | ADS-B | `kAdsbFetchIntervalMs`, `kAdsbShowGroundAircraft` |
+| MQTT | `kMqttDefaultPort`, `kMqttDefaultTopicPrefix`, `kMqttDefaultDiscoveryPrefix`, `kMqttDefaultDeviceName`, `kMqttStateIntervalMs`, `kMqttMinFreeHeap`, `kMqttPacketSize` (must equal `-DMQTT_MAX_PACKET_SIZE`) |
 
 Range presets: `include/ui/radar_range.h` (`kRangePresets`).
+
+## Home Assistant (MQTT)
+
+The radar can publish itself to Home Assistant over MQTT with **auto-discovery**: no YAML on the HA
+side, no entity to declare by hand. Fill in the MQTT fields in the config portal (see above), enable
+**Publish to Home Assistant**, and the device appears as one HA device with ten entities.
+
+- **Discovery topics:** `<prefix>/<component>/<node>/<object>/config` (retained), where `<node>` is
+  the base topic with `/` replaced by `_`, e.g. `homeassistant/select/planeradar_a1b2c3/range/config`.
+- **Topics:** state on `<base>/state/<key>`, commands on `<base>/cmd/<key>`, availability on
+  `<base>/status` (`online` / `offline` via MQTT last will).
+- **Session:** the broker session is kept (`cleanSession=false`) and commands arrive at QoS 1, so a
+  tap in HA is not lost while the board is busy with an ADS-B fetch.
+
+| Entity | Type | What it does |
+|--------|------|--------------|
+| Range | `select` | Radar range preset (5 / 10 / 15 / 25 km) |
+| Miles | `switch` | Ring labels in mi instead of km |
+| Runways | `switch` | Airport runway overlay |
+| Latitude / Longitude | `number` | Radar center; the grid redraws immediately |
+| Aircraft in range | `sensor` | Aircraft currently in the ADS-B snapshot |
+| Nearest aircraft | `sensor` | Callsign, with type/altitude/distance/speed/track as attributes |
+| Wi-Fi RSSI | `sensor` | dBm |
+| Free heap | `sensor` | Bytes; the radar skips telemetry below `kMqttMinFreeHeap` |
+| Radar info | `sensor` | IP as state, SSID/uptime/firmware as attributes |
+
+Commands are applied to NVS and **re-published as state**, so HA always shows the value the radar
+actually accepted (an out-of-range coordinate is rejected, not echoed back).
+
+**Broker requirements:** plain **TCP, no TLS**. The ESP32-C3 already keeps a TLS client for the ADS-B
+fetch alive (that session is reused between polls, which is what makes the poll affordable); a second
+TLS handshake for MQTT does not fit the heap. Point it at port `1883`. A dedicated broker user with
+write access limited to `planeradar/#` and `homeassistant/#` is recommended — the credentials are
+stored unencrypted in NVS, and the LAN portal on port 80 is not authenticated.
 
 ## Project layout
 
@@ -125,6 +169,10 @@ include/
     wifi_setup.h
     radar_location.h
     adsb_client.h
+    mqtt_client.h          — HA discovery, commands, telemetry
+    mqtt_config.h          — the 8 portal fields in NVS
+    mqtt_discovery.h       — pure discovery payload builders
+    nearest_aircraft.h     — pure nearest-aircraft math
 data/
   ui_font.vlw              — embedded smooth UI font (Noto Sans Bold)
 scripts/
@@ -207,3 +255,6 @@ The release workflow builds firmware in CI and attaches the merged image to the 
 - [LovyanGFX](https://github.com/lovyan03/LovyanGFX)
 - [WiFiManager](https://github.com/tzapu/WiFiManager)
 - [ArduinoJson](https://github.com/bblanchon/ArduinoJson)
+- [PubSubClient](https://github.com/knolleary/pubsubclient) — MQTT. Built with
+  `-DMQTT_MAX_PACKET_SIZE=768`: the default (256 B) truncates discovery payloads silently, because
+  the ceiling covers topic + payload + header together.
