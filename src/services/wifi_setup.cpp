@@ -16,6 +16,7 @@
 
 #include "config.h"
 #include "services/mqtt_config.h"
+#include "services/mqtt_client.h"
 #include "services/radar_location.h"
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
@@ -95,7 +96,7 @@ WiFiManagerParameter s_param_runways("show_runways", "Show airport runways", "T"
 char s_mqtt_on_checkbox_attrs[32] = "type=\"checkbox\"";
 WiFiManagerParameter s_param_mqtt_on("mqtt_on", "Publish to Home Assistant (MQTT)", "T", 2,
                                      s_mqtt_on_checkbox_attrs, WFM_LABEL_AFTER);
-WiFiManagerParameter s_param_mqtt_host("mqtt_host", "MQTT broker host", "", 64,
+WiFiManagerParameter s_param_mqtt_host("mqtt_host", "<br/>MQTT broker host", "", 64,
                                        " type=\"text\" placeholder=\"e.g. 192.168.0.10\"");
 WiFiManagerParameter s_param_mqtt_port("mqtt_port", "MQTT broker port", "", kPortParamLen,
                                        " type=\"number\" min=\"1\" max=\"65535\""
@@ -155,12 +156,20 @@ void onPortalParamsSaved() {
   ui::radar::saveMilesFromPortal(s_param_miles.getValue());
   ui::radar::saveRunwaysFromPortal(s_param_runways.getValue());
 
-  refreshPortalParamValues();
+  // The fields must be READ before the refresh: refreshPortalParamValues() reloads
+  // the saved config into every parameter, so running it first replaced what the
+  // user had just typed with the old values -- and saveFromPortal() then stored
+  // those back. The portal could never change the broker.
   services::mqtt::saveFromPortal(
       s_param_mqtt_host.getValue(), s_param_mqtt_port.getValue(),
       s_param_mqtt_user.getValue(), s_param_mqtt_pass.getValue(),
       s_param_mqtt_topic.getValue(), s_param_mqtt_prefix.getValue(),
       s_param_mqtt_name.getValue(), s_param_mqtt_on.getValue());
+
+  refreshPortalParamValues();
+  // Apply the saved config now: a host or port that only takes effect on the next
+  // boot is exactly what this callback is here to avoid.
+  services::mqtt::init();
 }
 
 void attachPortalParams(WiFiManager& wm) {

@@ -272,8 +272,8 @@ void connectBroker() {
 
   // Reconnecting after the fetch borrowed the socket must not replay the
   // discovery burst: it is retained in the broker and HA already has the
-  // entities. Refreshing once a minute is cheap insurance against a broker
-  // that restarted and lost the retained topics.
+  // entities. A periodic refresh is cheap insurance against a broker that
+  // restarted and lost the retained topics.
   const bool discovery_fresh =
       s_discovery_done_ms != 0 &&
       (millis() - s_discovery_done_ms) < config::kMqttDiscoveryRefreshMs;
@@ -299,6 +299,17 @@ static_assert(MQTT_MAX_PACKET_SIZE == config::kMqttPacketSize,
               "MQTT_MAX_PACKET_SIZE must match config::kMqttPacketSize");
 
 void init() {
+  // init() runs again on every portal save, so it cannot assume it is booting: the
+  // socket Home Assistant is watching is still open, and loop() is about to stop
+  // driving it. A clean DISCONNECT suppresses the will and an undriven session never
+  // loses its socket, so say goodbye on the old base before anything changes.
+  if (s_mqtt.connected()) {
+    std::snprintf(s_topic, sizeof(s_topic), "%s/status", s_base);
+    s_mqtt.publish(s_topic, "offline", true);
+    s_mqtt.disconnect();
+  } else {
+    s_net.stop();  // a socket left over from a failed reconnect, if any
+  }
   loadConfig(s_cfg);
   buildTopics();
   if (!s_cfg.enabled) {
@@ -315,6 +326,13 @@ void init() {
   s_mqtt.setServer(s_cfg.host, s_cfg.port);
   s_mqtt.setCallback(onMessage);
   s_mqtt.setBufferSize(config::kMqttPacketSize);
+  // A saved config can rename the base topic, the discovery prefix or the device, so
+  // the retained configs HA is holding no longer match what we are about to publish.
+  // Reset the burst instead of waiting out kMqttDiscoveryRefreshMs with no entities.
+  // Boot already starts at zero; only a portal save can arrive with these set.
+  s_discovery_done_ms = 0;
+  s_discovery_index = 0;
+  s_last_discovery_ms = 0;
   s_state = State::WaitingLink;
   Serial.printf("MQTT: node %s client %s broker %s:%u topic '%s' prefix '%s'\n", s_node,
                 s_client_id, s_cfg.host, s_cfg.port, s_base, s_ctx.prefix);
