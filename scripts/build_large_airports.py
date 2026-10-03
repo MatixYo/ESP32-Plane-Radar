@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Build runway dataset from OurAirports (large_airport only)."""
+"""Build runway dataset from OurAirports with configurable airport types."""
 
 from __future__ import annotations
 
 import csv
 import io
+import sys
 import urllib.request
 from pathlib import Path
 
@@ -20,6 +21,14 @@ RUNWAYS_URL = (
     "https://raw.githubusercontent.com/davidmegginson/ourairports-data/main/"
     "runways.csv"
 )
+
+AIRPORT_TYPE_MAP = {
+    "large_airport": 0,
+    "medium_airport": 1,
+    "small_airport": 2,
+    "military_airport": 3,
+}
+
 
 def fetch_csv(url: str) -> list[dict[str, str]]:
     with urllib.request.urlopen(url, timeout=60) as resp:
@@ -58,16 +67,17 @@ def is_helipad(row: dict[str, str]) -> bool:
     return length_ft < 2500
 
 
-def build_dataset() -> tuple[
-    list[tuple[str, int, int]],
+def build_dataset(allowed_types: set[str]) -> tuple[
+    list[tuple[str, int, int, int]],
     list[tuple[int, int, int, int, int, int]],
 ]:
     airports = fetch_csv(AIRPORTS_URL)
     runways = fetch_csv(RUNWAYS_URL)
 
-    large_idents: dict[str, tuple[int, int]] = {}
+    airport_data: dict[str, tuple[int, int, int]] = {}
     for a in airports:
-        if a.get("type") != "large_airport":
+        airport_type = a.get("type")
+        if airport_type not in allowed_types:
             continue
         ident = (a.get("ident") or "").strip()
         if len(ident) != 4:
@@ -76,12 +86,13 @@ def build_dataset() -> tuple[
         lon = coord_e7(a.get("longitude_deg"))
         if lat is None or lon is None:
             continue
-        large_idents[ident] = (lat, lon)
+        type_code = AIRPORT_TYPE_MAP.get(airport_type, 0)
+        airport_data[ident] = (lat, lon, type_code)
 
     airport_rows = sorted(
-        (ident, lat, lon) for ident, (lat, lon) in large_idents.items()
+        (ident, lat, lon, type_code) for ident, (lat, lon, type_code) in airport_data.items()
     )
-    airport_index = {ident: idx for idx, (ident, _, _) in enumerate(airport_rows)}
+    airport_index = {ident: idx for idx, (ident, _, _, _) in enumerate(airport_rows)}
 
     segments: list[tuple[int, int, int, int, int, int]] = []
     for r in runways:
@@ -131,10 +142,18 @@ def render_header(airport_count: int, segment_count: int) -> str:
             "",
             "namespace data::large_airports {",
             "",
+            "enum class AirportType : uint8_t {",
+            "  kLarge = 0,",
+            "  kMedium = 1,",
+            "  kSmall = 2,",
+            "  kMilitary = 3,",
+            "};",
+            "",
             "struct Airport {",
             "  char ident[5];",
             "  int32_t lat_e7;",
             "  int32_t lon_e7;",
+            "  AirportType type;",
             "};",
             "",
             "struct Runway {",
@@ -159,7 +178,7 @@ def render_header(airport_count: int, segment_count: int) -> str:
 
 
 def render_cpp(
-    airport_rows: list[tuple[str, int, int]],
+    airport_rows: list[tuple[str, int, int, int]],
     segments: list[tuple[int, int, int, int, int, int]],
 ) -> str:
     lines = [
@@ -170,8 +189,8 @@ def render_cpp(
         "",
         "const Airport kAirports[] = {",
     ]
-    for ident, lat, lon in airport_rows:
-        lines.append(f'  {{"{ident}", {lat}, {lon}}},')
+    for ident, lat, lon, type_code in airport_rows:
+        lines.append(f'  {{"{ident}", {lat}, {lon}, AirportType({type_code})}},')
     lines += [
         "};",
         "",
@@ -191,7 +210,14 @@ def render_cpp(
 
 
 def main() -> int:
-    airport_rows, segments = build_dataset()
+    if len(sys.argv) > 1:
+        allowed_types = set(sys.argv[1:])
+        print(f"Building with airport types: {sorted(allowed_types)}")
+    else:
+        allowed_types = {"large_airport", "medium_airport"}
+        print("Building with default airport types: large_airport, medium_airport")
+
+    airport_rows, segments = build_dataset(allowed_types)
     header = render_header(len(airport_rows), len(segments))
     cpp = render_cpp(airport_rows, segments)
 

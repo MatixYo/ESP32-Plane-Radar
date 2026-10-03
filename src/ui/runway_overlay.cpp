@@ -8,6 +8,7 @@
 #include "data/large_airports.h"
 #include "hardware/display_font.h"
 #include "services/radar_location.h"
+#include "services/airport_filters.h"
 #include "ui/radar_range.h"
 #include "ui/radar_theme.h"
 
@@ -72,9 +73,7 @@ void applyRunwayLabelStyle(lgfx::LGFXBase& gfx) {
 float e7ToDeg(int32_t e7) { return static_cast<float>(e7) * 1e-7f; }
 
 void offsetKmFromCenter(float lat, float lon, float* dx_km, float* dy_km,
-                        float* dist_km) {
-  // Longitude degrees shrink toward the poles; scale by cos(latitude) so
-  // east-west distance isn't overstated away from the equator.
+                         float* dist_km) {
   const float center_lat_rad =
       static_cast<float>(services::location::lat()) * kDegToRad;
   *dx_km = static_cast<float>(lon - services::location::lon()) * kKmPerDeg *
@@ -268,6 +267,11 @@ void drawLargeAirportRunways(lgfx::LGFXBase& gfx) {
     const uint16_t ap_idx = rw.airport_idx;
     if (!s_in_range[ap_idx]) {
       const auto& ap = data::large_airports::kAirports[ap_idx];
+      if (!services::airport_filters::shouldShowAirportType(
+              static_cast<uint8_t>(ap.type))) {
+        s_in_range[ap_idx] = false;
+        continue;
+      }
       float dx_km = 0.0f;
       float dy_km = 0.0f;
       float dist_km = 0.0f;

@@ -6,10 +6,18 @@
 
 namespace data::large_airports {
 
+enum class AirportType : uint8_t {
+  kLarge = 0,
+  kMedium = 1,
+  kSmall = 2,
+  kMilitary = 3,
+};
+
 struct Airport {
   char ident[5];
   int32_t lat_e7;
   int32_t lon_e7;
+  AirportType type;
 };
 
 struct Runway {
@@ -21,8 +29,8 @@ struct Runway {
   uint16_t length_m;
 };
 
-constexpr size_t kAirportCount = 1166;
-constexpr size_t kRunwayCount = 1706;
+constexpr size_t kAirportCount = 29205;
+constexpr size_t kRunwayCount = 13292;
 
 extern const Airport kAirports[];
 extern const Runway kRunways[];
