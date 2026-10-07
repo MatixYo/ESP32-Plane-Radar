@@ -87,7 +87,12 @@ void setup() {
 
   // Start the background ADS-B fetch (pinned to core 0, away from the render
   // loop on core 1). It checks Wi-Fi state each cycle.
-  xTaskCreatePinnedToCore(adsbFetchTask, "adsb", 16384, nullptr, 1, nullptr, 0);
+  //
+  // The stack comes out of the same heap the fetch's TLS connection needs, so
+  // it is sized from use: a fetch -- TLS handshake, chunked body, filtered
+  // parse -- peaks at about 8.7 KB (high-water mark on an ESP32-C3), and the
+  // rest of the 12 KB is margin.
+  xTaskCreatePinnedToCore(adsbFetchTask, "adsb", 12288, nullptr, 1, nullptr, 0);
 }
 
 void loop() {
