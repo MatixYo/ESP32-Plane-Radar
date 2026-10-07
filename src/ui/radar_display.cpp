@@ -696,13 +696,26 @@ bool ensureFrameSprite() {
   if (s_frame_ready) {
     return true;
   }
+  // RGB332, one byte a pixel, on every panel: the frame is the largest single
+  // allocation this firmware makes, and at 16bpp it costs 115,204 B at 240x240
+  // and 259,200 B at 360x360 -- more than an ESP32-C3 can spare once WiFi and
+  // the ADS-B fetch are up. At 8bpp it is 57,602 B and 129,600 B.
+  //
+  // LovyanGFX's RGB332 is a true RGB format whose converter supports alpha
+  // blending. Palette depths go through copy_bit_affine instead, which masks raw
+  // bytes into index bits and silently corrupts every antialiased primitive we
+  // draw (fillSmoothCircle, drawWideLine), so there is deliberately no 4bpp
+  // fallback below this.
   s_frame.setColorDepth(lgfx::color_depth_t::rgb332_1Byte);
-  if (!s_frame.createSprite(radar::kSize, radar::kSize)) {
-    Serial.println("radar: frame sprite alloc failed");
-    return false;
+  if (s_frame.createSprite(radar::kSize, radar::kSize)) {
+    Serial.printf("radar: frame sprite %dx%d @8bpp\n", radar::kSize,
+                  radar::kSize);
+    s_frame_ready = true;
+    return true;
   }
-  s_frame_ready = true;
-  return true;
+
+  Serial.println("radar: no frame sprite fits - drawing direct to panel");
+  return false;
 }
 
 // Double-buffered frame: composite the grid AND aircraft into the off-screen
@@ -714,6 +727,7 @@ void renderFrame() {
     const DrawScope scope(s_frame);
     drawAircraft();
   }
+  displayWaitForFrameStart();
   s_frame.pushSprite(0, 0);
   tft.setTextDatum(textdatum_t::top_left);
 }

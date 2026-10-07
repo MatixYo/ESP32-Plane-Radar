@@ -4,7 +4,9 @@
 
 **3D printed case (STL + assembly):** [MakerWorld](https://makerworld.com/en/models/2872376-esp32-plane-radar-live-ads-b-on-a-round-display#profileId-3207083) · **Firmware:** [Releases](https://github.com/MatixYo/ESP32-Plane-Radar/releases)
 
-Firmware for an **ESP32-C3 Super Mini** and a **1.28″ round GC9A01** display (240×240). Shows a circular **ADS-B radar** around your configured location, with **WiFiManager** for first-time setup.
+Firmware for an **ESP32-C3 Super Mini** and a round SPI display — **1.28″ GC9A01** (240×240) or **2.1″ GC9B72** (360×360). Shows a circular **ADS-B radar** around your configured location, with **WiFiManager** for first-time setup.
+
+The radar layout is derived from the panel size at runtime, so both displays get the same design scaled to fit rather than a second set of hand-tuned constants.
 
 ## What it does
 
@@ -138,7 +140,13 @@ src/
   services/
 ```
 
-## Wiring (GC9A01 ↔ ESP32-C3 Super Mini)
+## Wiring
+
+`BOOT (user)` is the on-board button on **GPIO 9** in every combination below — no wire.
+
+### GC9A01 (1.28″ round, 240×240) ↔ ESP32-C3 Super Mini
+
+The shipping build.
 
 | Display | ESP32-C3 |
 |---------|----------|
@@ -151,16 +159,77 @@ src/
 | SCL (SCLK) | GPIO **4** |
 | BOOT (user) | GPIO **9** |
 
+### GC9B72 (2.1″ round, 360×360) ↔ ESP32-C3 Super Mini
+
+| Display | ESP32-C3 | |
+|---------|----------|---|
+| VCC | 3V3 | **3.3 V only** — the module has no regulator |
+| GND | GND | |
+| RES | GPIO **0** | |
+| CS | GPIO **1** | |
+| DC | GPIO **10** | |
+| SDA (MOSI) | GPIO **3** | |
+| SCL (SCLK) | GPIO **4** | |
+| BL | GPIO **5** | backlight, on a GPIO so it can be dimmed |
+| SDO (MISO) | GPIO **6** | optional — see below |
+| TE | GPIO **7** | optional — see below |
+| BOOT (user) | GPIO **9** | on-board button |
+
+Only `RES`, `CS`, `DC`, `SDA` and `SCL` are required; the rest are set to `-1` in
+`include/config.h` when not wired, and the firmware adapts.
+
+**SDO (MISO).** The radar composes each frame in an off-screen sprite and pushes
+it in one pass, so nothing normally reads back from the panel. It matters on the
+fallback path taken when no frame sprite can be allocated, where LovyanGFX's
+antialiased primitives read the panel to blend against it — with SDO unwired
+those blends have nothing to read.
+
+**TE (tearing effect).** The GC9B72 init sequence enables this output, but
+LovyanGFX does not consume it — `getScanLine()` returns `-1` for every SPI panel
+— so the firmware polls it directly in `displayWaitForFrameStart()` and starts
+the push on the edge. A full 360×360 frame is 259,200 bytes on the wire, about
+104 ms at 20 MHz, which is long enough for a seam to show without it. The wait
+times out after 25 ms so a miswired line cannot stall the main loop.
+
+**Backlight current.** The 2.1″ backlight draws several times what the 1.28″ one
+does, and rides the Super Mini's 3V3 LDO alongside WiFi transmit bursts. Measure
+3V3 under load before trusting it; TX power is already capped to 8.5 dBm for
+related reasons.
+
+**Board orientation.** Holding the Super Mini with USB-C up, `GPIO5` and `5V` are
+the pads nearest the connector and `GPIO20`/`GPIO21` the two furthest. Published
+pinouts appear in both orientations — check the silkscreen, not a diagram.
+
 ## Build
 
+Pick the environment that matches the display fitted:
+
+| Display | Environment | Resolution |
+|---------|-------------|------------|
+| 1.28″ GC9A01 | `supermini` | 240×240 |
+| 2.1″ GC9B72 | `supermini_gc9b72` | 360×360 |
+
 ```bash
-pio run -t upload
+# 1.28" GC9A01 (default)
+pio run -e supermini -t upload
+
+# 2.1" GC9B72
+pio run -e supermini_gc9b72 -t upload
+
 pio device monitor
 ```
 
-- PlatformIO env: **`supermini`**
 - Serial: **115200** baud
 - USB CDC on boot enabled in `platformio.ini` for the Super Mini
+- The two environments differ only by `-DPLANE_RADAR_PANEL_GC9B72`, which selects
+  the panel driver, pins, SPI clock and colour settings in `include/config.h`
+- The 360×360 frame buffer does not fit at 16 bits on an ESP32-C3, so the radar
+  falls back to 8-bit RGB332 (129,600 B instead of 259,200 B). The chosen depth is
+  printed at boot:
+
+  ```
+  radar: frame sprite 360x360 @8bpp
+  ```
 
 ### Web-flashable release image
 
