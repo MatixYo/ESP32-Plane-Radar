@@ -49,24 +49,6 @@ void pollNetwork() {
   }
 }
 
-int performGetWithPoll(HTTPClient& http) {
-  http.setConnectTimeout(kConnectTimeoutMs);
-  const unsigned long deadline = millis() + kRequestTimeoutMs;
-  while (millis() < deadline) {
-    pollNetwork();
-    const int code = http.GET();
-    if (code > 0) {
-      return code;
-    }
-    if (code != HTTPC_ERROR_CONNECTION_REFUSED &&
-        code != HTTPC_ERROR_NOT_CONNECTED) {
-      return code;
-    }
-    delay(5);
-  }
-  return HTTPC_ERROR_READ_TIMEOUT;
-}
-
 /**
  * Pumps the socket one byte at a time, in blocks, without buffering the whole
  * response.
@@ -311,7 +293,13 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   http.collectHeaders(kWantedHeaders, 1);
 
   http.setTimeout(kRequestTimeoutMs);
-  const int code = performGetWithPoll(http);
+  http.setConnectTimeout(kConnectTimeoutMs);
+
+  // One attempt: a failed connect is retried by the next fetch. Retrying it
+  // here can't help -- a TLS setup that couldn't get its buffers also comes
+  // back as CONNECTION_REFUSED, and nothing frees heap between tries.
+  pollNetwork();
+  const int code = http.GET();
   if (code != HTTP_CODE_OK) {
     Serial.printf("adsb: HTTP %d\n", code);
     http.end();
