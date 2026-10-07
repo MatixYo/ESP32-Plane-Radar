@@ -1,5 +1,6 @@
 #include "ui/radar_display.h"
 
+#include <Arduino.h>
 #include <lgfx/v1/lgfx_fonts.hpp>
 
 #include <algorithm>
@@ -211,6 +212,31 @@ void offsetKmFromCenter(float lat, float lon, float* dx_km, float* dy_km,
   *dy_km =
       static_cast<float>(lat - services::location::lat()) * kKmPerDeg;
   *dist_km = sqrtf((*dx_km) * (*dx_km) + (*dy_km) * (*dy_km));
+}
+
+/**
+ * Dead-reckon an aircraft's position from its last-fetched fix along its ground
+ * track, so it moves smoothly between ADS-B updates. Uses the same flat
+ * 1° ≈ 111 km projection as offsetKmFromCenter(), so it round-trips exactly.
+ */
+void extrapolatedLatLon(const services::adsb::Aircraft& plane,
+                        unsigned long base_ms, float* lat, float* lon) {
+  *lat = plane.lat;
+  *lon = plane.lon;
+  if (base_ms == 0 || plane.gs_knots <= 0.0f) {
+    return;
+  }
+  // Elapsed since the fix was measured = time since fetch + the fix's own age.
+  const unsigned long elapsed_ms = (millis() - base_ms) + plane.pos_age_ms;
+  const float elapsed_h = static_cast<float>(elapsed_ms) / 3600000.0f;
+  const float dist_km = plane.gs_knots * 1.852f * elapsed_h;  // knots -> km
+  if (dist_km <= 0.0f) {
+    return;
+  }
+  constexpr float kDegToRad = 0.01745329252f;
+  const float rad = plane.track_deg * kDegToRad;  // track: 0 = N, 90 = E
+  *lat = plane.lat + (dist_km * cosf(rad)) / kKmPerDeg;
+  *lon = plane.lon + (dist_km * sinf(rad)) / kKmPerDeg;
 }
 
 float innerRingMaxKm() {
@@ -488,8 +514,11 @@ void sortBeyondDotsFarFirst(BeyondDotDrawItem* items, size_t count) {
 void drawAircraft() {
   initLabelMetrics();
 
-  const size_t n = services::adsb::aircraftCount();
-  const services::adsb::Aircraft* planes = services::adsb::aircraftList();
+  // Snapshot under the adsb lock (the fetch may run on another thread).
+  static services::adsb::Aircraft planes[services::adsb::kMaxAircraft];
+  unsigned long base_ms = 0;
+  const size_t n = services::adsb::snapshotAircraft(
+      planes, services::adsb::kMaxAircraft, &base_ms);
 
   AircraftDrawItem items[services::adsb::kMaxAircraft];
   BeyondDotDrawItem dots[services::adsb::kMaxAircraft];
@@ -497,15 +526,20 @@ void drawAircraft() {
   size_t dot_count = 0;
 
   for (size_t i = 0; i < n; ++i) {
+    // Dead-reckoned position for smooth motion between fetches.
+    float lat = 0.0f;
+    float lon = 0.0f;
+    extrapolatedLatLon(planes[i], base_ms, &lat, &lon);
+
     float dx_km = 0.0f;
     float dy_km = 0.0f;
     float dist_km = 0.0f;
-    offsetKmFromCenter(planes[i].lat, planes[i].lon, &dx_km, &dy_km, &dist_km);
+    offsetKmFromCenter(lat, lon, &dx_km, &dy_km, &dist_km);
 
     if (isInsideOuterRingKm(dist_km)) {
       int x = 0;
       int y = 0;
-      latLonToScreen(planes[i].lat, planes[i].lon, &x, &y);
+      latLonToScreen(lat, lon, &x, &y);
       items[draw_count].index = i;
       items[draw_count].x = x;
       items[draw_count].y = y;
@@ -516,8 +550,7 @@ void drawAircraft() {
 
     int dot_x = 0;
     int dot_y = 0;
-    if (!beyondRingEdgeDotFromLatLon(planes[i].lat, planes[i].lon, &dot_x,
-                                     &dot_y)) {
+    if (!beyondRingEdgeDotFromLatLon(lat, lon, &dot_x, &dot_y)) {
       continue;
     }
     dots[dot_count].x = dot_x;
@@ -663,26 +696,22 @@ bool ensureFrameSprite() {
   if (s_frame_ready) {
     return true;
   }
-
-  // Best colour depth that fits. 16bpp is 115,200 B at 240x240 and always wins
-  // there; at 360x360 it is 259,200 B, which an ESP32-C3 cannot spare once WiFi
-  // is up.
+  // RGB332, one byte a pixel, on every panel: the frame is the largest single
+  // allocation this firmware makes, and at 16bpp it costs 115,204 B at 240x240
+  // and 259,200 B at 360x360 -- more than an ESP32-C3 can spare once WiFi and
+  // the ADS-B fetch are up. At 8bpp it is 57,602 B and 129,600 B.
   //
-  // 8 is the floor worth trying. LovyanGFX maps setColorDepth(8) to RGB332 — a
-  // true RGB format whose converter supports alpha blending. Palette depths go
-  // through copy_bit_affine instead, which masks raw bytes into index bits and
-  // silently corrupts every antialiased primitive we draw (fillSmoothCircle,
-  // drawWideLine), so there is deliberately no 4bpp rung.
-  static constexpr int kDepthLadder[] = {16, 8};
-
-  for (const int depth : kDepthLadder) {
-    s_frame.setColorDepth(depth);
-    if (s_frame.createSprite(radar::kSize, radar::kSize)) {
-      Serial.printf("radar: frame sprite %dx%d @%dbpp\n", radar::kSize,
-                    radar::kSize, depth);
-      s_frame_ready = true;
-      return true;
-    }
+  // LovyanGFX's RGB332 is a true RGB format whose converter supports alpha
+  // blending. Palette depths go through copy_bit_affine instead, which masks raw
+  // bytes into index bits and silently corrupts every antialiased primitive we
+  // draw (fillSmoothCircle, drawWideLine), so there is deliberately no 4bpp
+  // fallback below this.
+  s_frame.setColorDepth(lgfx::color_depth_t::rgb332_1Byte);
+  if (s_frame.createSprite(radar::kSize, radar::kSize)) {
+    Serial.printf("radar: frame sprite %dx%d @8bpp\n", radar::kSize,
+                  radar::kSize);
+    s_frame_ready = true;
+    return true;
   }
 
   Serial.println("radar: no frame sprite fits - drawing direct to panel");

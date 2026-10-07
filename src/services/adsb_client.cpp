@@ -5,9 +5,13 @@
 
 #include <ArduinoJson.h>
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+
 #include <cstring>
 
 #include "config.h"
+#include "services/http_body_framing.h"
 
 namespace services::adsb {
 
@@ -15,12 +19,29 @@ namespace {
 
 constexpr char kApiBase[] = "https://opendata.adsb.fi/api/v3/lat/";
 constexpr float kKmPerNm = 1.852f;
-constexpr int kConnectAttemptMs = 200;
-constexpr unsigned long kRequestTimeoutMs = 10000;
+constexpr int kConnectTimeoutMs = 5000;  // TLS handshake needs room
+constexpr unsigned long kRequestTimeoutMs = 6000;
 
 Aircraft s_aircraft[kMaxAircraft];
 size_t s_aircraft_count = 0;
+unsigned long s_last_update_ms = 0;
 PollFn s_poll_fn = nullptr;
+SemaphoreHandle_t s_mutex = nullptr;
+
+/** Publish parsed aircraft to the shared buffer atomically. */
+void publish(const Aircraft* src, size_t count) {
+  if (s_mutex != nullptr) {
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+  }
+  for (size_t i = 0; i < count; ++i) {
+    s_aircraft[i] = src[i];
+  }
+  s_aircraft_count = count;
+  s_last_update_ms = millis();  // base time for dead-reckoning
+  if (s_mutex != nullptr) {
+    xSemaphoreGive(s_mutex);
+  }
+}
 
 void pollNetwork() {
   if (s_poll_fn != nullptr) {
@@ -29,7 +50,7 @@ void pollNetwork() {
 }
 
 int performGetWithPoll(HTTPClient& http) {
-  http.setConnectTimeout(kConnectAttemptMs);
+  http.setConnectTimeout(kConnectTimeoutMs);
   const unsigned long deadline = millis() + kRequestTimeoutMs;
   while (millis() < deadline) {
     pollNetwork();
@@ -46,44 +67,67 @@ int performGetWithPoll(HTTPClient& http) {
   return HTTPC_ERROR_READ_TIMEOUT;
 }
 
-bool readResponseBodyWithPoll(HTTPClient& http, String& payload) {
-  WiFiClient* stream = http.getStreamPtr();
-  if (stream == nullptr) {
+/**
+ * Pumps the socket one byte at a time, in blocks, without buffering the whole
+ * response.
+ *
+ * Each refill runs the network poll callback, which is why HTTPClient's own
+ * body readers (getString/writeToStream) can't be used here -- they block
+ * without giving the fetch task a chance to poll. That also means they can't
+ * de-chunk for us, so the wire image comes out raw and BodyFramer unwraps it.
+ *
+ * Where the body ends is BodyFramer's business, not this class's: it stops
+ * pulling at the right byte. Reading a little past that point into buffer_ is
+ * harmless while the connection is torn down after every fetch.
+ */
+class PollingSocketSource {
+ public:
+  PollingSocketSource(HTTPClient& http, WiFiClient& stream,
+                      unsigned long deadline)
+      : http_(&http), stream_(&stream), deadline_(deadline) {}
+
+  /** Next raw byte, or -1 once the socket closes or the deadline passes. */
+  int read() {
+    if (pos_ >= len_ && !refill()) {
+      return -1;
+    }
+    return static_cast<unsigned char>(buffer_[pos_++]);
+  }
+
+ private:
+  bool refill() {
+    pos_ = 0;
+    len_ = 0;
+    while (millis() < deadline_) {
+      pollNetwork();
+      const int available = stream_->available();
+      if (available > 0) {
+        const int to_read = available > static_cast<int>(sizeof(buffer_))
+                                ? static_cast<int>(sizeof(buffer_))
+                                : available;
+        const int read_bytes = stream_->readBytes(buffer_, to_read);
+        if (read_bytes > 0) {
+          len_ = static_cast<size_t>(read_bytes);
+          return true;
+        }
+      }
+      if (!http_->connected() && stream_->available() <= 0) {
+        break;  // server closed and the socket is drained
+      }
+      delay(1);
+    }
     return false;
   }
 
-  const int content_length = http.getSize();
-  if (content_length > 0) {
-    payload.reserve(static_cast<unsigned>(content_length + 1));
-  }
+  HTTPClient* http_;
+  WiFiClient* stream_;
+  unsigned long deadline_;
+  char buffer_[512];
+  size_t pos_ = 0;
+  size_t len_ = 0;
+};
 
-  uint8_t buffer[512];
-  const unsigned long deadline = millis() + kRequestTimeoutMs;
-  while (millis() < deadline) {
-    pollNetwork();
-    const int available = stream->available();
-    if (available > 0) {
-      const int to_read =
-          available > static_cast<int>(sizeof(buffer)) ? static_cast<int>(sizeof(buffer))
-                                                       : available;
-      const int read_bytes = stream->readBytes(buffer, to_read);
-      if (read_bytes > 0) {
-        payload.concat(reinterpret_cast<const char*>(buffer),
-                       static_cast<unsigned>(read_bytes));
-      }
-    }
-    if (content_length > 0 &&
-        static_cast<int>(payload.length()) >= content_length) {
-      break;
-    }
-    if (!http.connected() && stream->available() <= 0) {
-      break;
-    }
-    delay(1);
-  }
-
-  return payload.length() > 0;
-}
+using BodyReader = services::http::BodyFramer<PollingSocketSource>;
 
 float kmToNauticalMiles(float km) { return km / kKmPerNm; }
 
@@ -199,11 +243,38 @@ void fillTagFields(Aircraft* ac, const JsonObject& plane) {
 
 }  // namespace
 
+void init() {
+  if (s_mutex == nullptr) {
+    s_mutex = xSemaphoreCreateMutex();
+  }
+}
+
 void setPollFn(PollFn fn) { s_poll_fn = fn; }
 
 size_t aircraftCount() { return s_aircraft_count; }
 
 const Aircraft* aircraftList() { return s_aircraft; }
+
+unsigned long lastUpdateMs() { return s_last_update_ms; }
+
+size_t snapshotAircraft(Aircraft* out, size_t max_out,
+                        unsigned long* out_last_update_ms) {
+  if (s_mutex != nullptr) {
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+  }
+  const size_t count =
+      s_aircraft_count < max_out ? s_aircraft_count : max_out;
+  for (size_t i = 0; i < count; ++i) {
+    out[i] = s_aircraft[i];
+  }
+  if (out_last_update_ms != nullptr) {
+    *out_last_update_ms = s_last_update_ms;
+  }
+  if (s_mutex != nullptr) {
+    xSemaphoreGive(s_mutex);
+  }
+  return count;
+}
 
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   const float dist_nm = kmToNauticalMiles(fetch_radius_km);
@@ -215,6 +286,16 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   url += "/dist/";
   url += String(dist_nm, 1);
 
+  // Keep only the fields we render; the rest never reaches RAM.
+  JsonDocument filter;
+  JsonObject f = filter["ac"].add<JsonObject>();
+  for (const char* key :
+       {"lat", "lon", "true_heading", "mag_heading", "track", "dir", "gs",
+        "tas", "ias", "alt_baro", "alt_geom", "seen_pos", "flight", "hex", "t",
+        "category"}) {
+    f[key] = true;
+  }
+
   WiFiClientSecure client;
   client.setInsecure();
 
@@ -224,7 +305,11 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     return false;
   }
 
-  http.useHTTP10(true);
+  // HTTPClient only records Transfer-Encoding in the collected headers when
+  // it is asked for up front; _transferEncoding itself is private.
+  static const char* kWantedHeaders[] = {"Transfer-Encoding"};
+  http.collectHeaders(kWantedHeaders, 1);
+
   http.setTimeout(kRequestTimeoutMs);
   const int code = performGetWithPoll(http);
   if (code != HTTP_CODE_OK) {
@@ -233,49 +318,79 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     return false;
   }
 
-  String payload;
-  if (!readResponseBodyWithPoll(http, payload)) {
-    Serial.println("adsb: empty response");
+  WiFiClient* stream = http.getStreamPtr();
+  if (stream == nullptr) {
+    Serial.println("adsb: no response stream");
     http.end();
     return false;
   }
-  http.end();
 
+  // On HTTP/1.1 the CDN answers with Transfer-Encoding: chunked, and
+  // getStreamPtr() hands back the raw socket -- chunk sizes and all. BodyFramer
+  // strips that framing back off.
+  const services::http::BodyFraming framing =
+      http.header("Transfer-Encoding").equalsIgnoreCase("chunked")
+          ? services::http::BodyFraming::kChunked
+          : services::http::BodyFraming::kIdentity;
+
+  PollingSocketSource source(http, *stream, millis() + kRequestTimeoutMs);
+  BodyReader body(source, framing, http.getSize());
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, payload);
+  const DeserializationError err =
+      deserializeJson(doc, body, DeserializationOption::Filter(filter));
+  // Read off the terminating chunk the parser stopped short of, so the socket
+  // sits at the end of the message. Not needed while every fetch builds its own
+  // connection, but a prerequisite for ever reusing one.
+  body.drain();
+  http.end();
   if (err) {
-    Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
+    if (body.framingError()) {
+      Serial.println("adsb: malformed chunked body");
+    } else if (body.bytesRead() == 0) {
+      Serial.println("adsb: empty response");
+    } else {
+      Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
+    }
     return false;
   }
 
-  JsonArray ac = doc["ac"].as<JsonArray>();
-  if (ac.isNull()) {
-    s_aircraft_count = 0;
-    return true;
-  }
-
+  // Parse into a local buffer, then publish atomically so a reader on another
+  // thread never sees a half-updated list.
+  Aircraft parsed[kMaxAircraft];
   size_t n = 0;
-  for (JsonObject plane : ac) {
-    if (n >= kMaxAircraft) {
-      break;
-    }
-    if (!plane["lat"].is<float>() || !plane["lon"].is<float>()) {
-      continue;
-    }
-    if (isOnGround(plane) && !config::kAdsbShowGroundAircraft) {
-      continue;
-    }
+  JsonArray ac = doc["ac"].as<JsonArray>();
+  if (!ac.isNull()) {
+    for (JsonObject plane : ac) {
+      if (n >= kMaxAircraft) {
+        break;
+      }
+      if (!plane["lat"].is<float>() || !plane["lon"].is<float>()) {
+        continue;
+      }
+      if (isOnGround(plane) && !config::kAdsbShowGroundAircraft) {
+        continue;
+      }
 
-    s_aircraft[n].lat = plane["lat"].as<float>();
-    s_aircraft[n].lon = plane["lon"].as<float>();
-    s_aircraft[n].nose_deg = pickNoseHeading(plane);
-    s_aircraft[n].track_deg = pickTrackHeading(plane);
-    s_aircraft[n].gs_knots = pickGroundSpeed(plane);
-    fillTagFields(&s_aircraft[n], plane);
-    ++n;
+      parsed[n].lat = plane["lat"].as<float>();
+      parsed[n].lon = plane["lon"].as<float>();
+      parsed[n].nose_deg = pickNoseHeading(plane);
+      parsed[n].track_deg = pickTrackHeading(plane);
+      parsed[n].gs_knots = pickGroundSpeed(plane);
+
+      // seen_pos: seconds since this position was measured. Use it as the
+      // dead-reckoning age offset, capped so a very stale fix isn't flung far.
+      float seen_pos = 0.0f;
+      readJsonFloat(plane, "seen_pos", &seen_pos);
+      if (seen_pos < 0.0f) seen_pos = 0.0f;
+      if (seen_pos > 30.0f) seen_pos = 30.0f;
+      parsed[n].pos_age_ms = static_cast<uint32_t>(seen_pos * 1000.0f);
+
+      fillTagFields(&parsed[n], plane);
+      ++n;
+    }
   }
 
-  s_aircraft_count = n;
+  publish(parsed, n);
   Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
   return true;
 }
