@@ -70,6 +70,7 @@ void applyRunwayLabelStyle(lgfx::LGFXBase& gfx) {
 }
 
 float e7ToDeg(int32_t e7) { return static_cast<float>(e7) * 1e-7f; }
+int32_t degToE7(float deg) { return static_cast<int32_t>(lroundf(deg * 1e7f)); }
 
 void offsetKmFromCenter(float lat, float lon, float* dx_km, float* dy_km,
                         float* dist_km) {
@@ -258,6 +259,22 @@ void drawLargeAirportRunways(lgfx::LGFXBase& gfx) {
   uint16_t label_airports[kMaxAirportLabels];
   size_t label_count = 0;
 
+  // The square around the range, in the table's units: an airport outside it
+  // is out of range, and comparing integers says so without the cosf and
+  // sqrtf of measuring its distance. The margin keeps rounding from turning
+  // away an airport the distance test would take.
+  constexpr float kSquareMarginDeg = 0.001f;
+  const float lat_deg = static_cast<float>(services::location::lat());
+  const float lon_deg = static_cast<float>(services::location::lon());
+  const float half_lat_deg = radius_km / kKmPerDeg + kSquareMarginDeg;
+  const float half_lon_deg =
+      radius_km / (kKmPerDeg * fabsf(cosf(lat_deg * kDegToRad))) +
+      kSquareMarginDeg;
+  const int32_t lat_min_e7 = degToE7(lat_deg - half_lat_deg);
+  const int32_t lat_max_e7 = degToE7(lat_deg + half_lat_deg);
+  const int32_t lon_min_e7 = degToE7(fmaxf(lon_deg - half_lon_deg, -180.0f));
+  const int32_t lon_max_e7 = degToE7(fminf(lon_deg + half_lon_deg, 180.0f));
+
   for (size_t i = 0; i < data::large_airports::kAirportCount; ++i) {
     s_in_range[i] = false;
     s_label_pending[i] = false;
@@ -268,6 +285,10 @@ void drawLargeAirportRunways(lgfx::LGFXBase& gfx) {
     const uint16_t ap_idx = rw.airport_idx;
     if (!s_in_range[ap_idx]) {
       const auto& ap = data::large_airports::kAirports[ap_idx];
+      if (ap.lat_e7 < lat_min_e7 || ap.lat_e7 > lat_max_e7 ||
+          ap.lon_e7 < lon_min_e7 || ap.lon_e7 > lon_max_e7) {
+        continue;
+      }
       float dx_km = 0.0f;
       float dy_km = 0.0f;
       float dist_km = 0.0f;
