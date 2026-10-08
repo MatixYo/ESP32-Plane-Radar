@@ -54,6 +54,11 @@ lgfx::LovyanGFX* s_draw = &tft;
 LGFX_Sprite s_frame(&tft);
 bool s_frame_ready = false;
 
+// Panel row at the top of the band being composited into s_frame; 0 whenever
+// s_frame holds the whole radar. The layout and aircraft positions stay in
+// panel coordinates, and each drawing call subtracts this on the way in.
+int s_band_top = 0;
+
 class DrawScope {
  public:
   explicit DrawScope(lgfx::LovyanGFX& gfx) : prev_(s_draw) { s_draw = &gfx; }
@@ -297,7 +302,7 @@ bool beyondRingEdgeDotFromLatLon(float lat, float lon, int* out_x, int* out_y) {
 }
 
 void drawBeyondRingDot(int x, int y) {
-  s_draw->fillSmoothCircle(x, y, radar::kBeyondRingDotRadiusPx,
+  s_draw->fillSmoothCircle(x, y - s_band_top, radar::kBeyondRingDotRadiusPx,
                            radar::kColorAircraft);
 }
 
@@ -372,8 +377,9 @@ void drawHeadingTriangle(int cx, int cy, float heading_deg, uint16_t color) {
   const int wing_x = static_cast<int>(lroundf(cos_h * radar::kAircraftTailHalfPx));
   const int wing_y = static_cast<int>(lroundf(sin_h * radar::kAircraftTailHalfPx));
 
-  s_draw->fillTriangle(tip_x, tip_y, base_x + wing_x, base_y + wing_y,
-                       base_x - wing_x, base_y - wing_y, color);
+  s_draw->fillTriangle(tip_x, tip_y - s_band_top, base_x + wing_x,
+                       base_y + wing_y - s_band_top, base_x - wing_x,
+                       base_y - wing_y - s_band_top, color);
 }
 
 void drawSpeedVector(int cx, int cy, float heading_deg, float track_deg,
@@ -395,8 +401,8 @@ void drawSpeedVector(int cx, int cy, float heading_deg, float track_deg,
   if (ex == tip_x && ey == tip_y) {
     return;
   }
-  s_draw->drawWideLine(tip_x, tip_y, ex, ey, radar::kAircraftTrackLineHalfWidth,
-                       color);
+  s_draw->drawWideLine(tip_x, tip_y - s_band_top, ex, ey - s_band_top,
+                       radar::kAircraftTrackLineHalfWidth, color);
 }
 
 void applyTagStyle() {
@@ -455,6 +461,7 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
     s_draw->setTextDatum(textdatum_t::top_right);
   }
   ly = std::max(1, std::min(ly, radar::kSize - block_h - 1));
+  ly -= s_band_top;
 
   if (plane.callsign[0] != '\0') {
     s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
@@ -511,17 +518,33 @@ void sortBeyondDotsFarFirst(BeyondDotDrawItem* items, size_t count) {
   }
 }
 
-void drawAircraft() {
-  initLabelMetrics();
+/**
+ * One frame's aircraft, in panel coordinates and far ones first. Placed once
+ * per frame and drawn into every band of it, so an aircraft that straddles two
+ * bands is drawn at the same point in both. Static, as the snapshot always
+ * was: it has to outlive every band's grid drawing, and on the loop task's
+ * stack it sat under that drawing and cut the task's spare stack from
+ * 5,900 B to 2,972 B.
+ */
+struct AircraftPlacement {
+  services::adsb::Aircraft planes[services::adsb::kMaxAircraft];
+  AircraftDrawItem items[services::adsb::kMaxAircraft];
+  BeyondDotDrawItem dots[services::adsb::kMaxAircraft];
+  size_t draw_count = 0;
+  size_t dot_count = 0;
+};
 
+AircraftPlacement s_placed;
+
+void placeAircraft() {
   // Snapshot under the adsb lock (the fetch may run on another thread).
-  static services::adsb::Aircraft planes[services::adsb::kMaxAircraft];
+  services::adsb::Aircraft* planes = s_placed.planes;
   unsigned long base_ms = 0;
   const size_t n = services::adsb::snapshotAircraft(
       planes, services::adsb::kMaxAircraft, &base_ms);
 
-  AircraftDrawItem items[services::adsb::kMaxAircraft];
-  BeyondDotDrawItem dots[services::adsb::kMaxAircraft];
+  AircraftDrawItem* items = s_placed.items;
+  BeyondDotDrawItem* dots = s_placed.dots;
   size_t draw_count = 0;
   size_t dot_count = 0;
 
@@ -560,11 +583,24 @@ void drawAircraft() {
   }
 
   sortBeyondDotsFarFirst(dots, dot_count);
+  sortDrawItemsFarFirst(items, draw_count);
+  s_placed.draw_count = draw_count;
+  s_placed.dot_count = dot_count;
+}
+
+void drawAircraft() {
+  initLabelMetrics();
+
+  const services::adsb::Aircraft* planes = s_placed.planes;
+  const AircraftDrawItem* items = s_placed.items;
+  const BeyondDotDrawItem* dots = s_placed.dots;
+  const size_t draw_count = s_placed.draw_count;
+  const size_t dot_count = s_placed.dot_count;
+
   for (size_t d = 0; d < dot_count; ++d) {
     drawBeyondRingDot(dots[d].x, dots[d].y);
   }
 
-  sortDrawItemsFarFirst(items, draw_count);
   for (size_t d = 0; d < draw_count; ++d) {
     const size_t i = items[d].index;
     const int x = items[d].x;
@@ -651,11 +687,12 @@ void drawCenterDot(int cx, int cy) {
 
 void drawCardinalLabels() {
   const int cx = radar::kCenterX;
-  const int cy = radar::kCenterY;
+  const int cy = radar::kCenterY - s_band_top;
   const int edge = radar::kSize - 1;
 
-  drawCardinalLabel("N", cx, radar::kCardinalNorthOffsetY, textdatum_t::top_center);
-  drawCardinalLabel("S", cx, edge + radar::kCardinalSouthOffsetY,
+  drawCardinalLabel("N", cx, radar::kCardinalNorthOffsetY - s_band_top,
+                    textdatum_t::top_center);
+  drawCardinalLabel("S", cx, edge + radar::kCardinalSouthOffsetY - s_band_top,
                     textdatum_t::bottom_center);
   drawCardinalLabel("W", 0, cy, textdatum_t::middle_left);
   drawCardinalLabel("E", edge, cy, textdatum_t::middle_right);
@@ -678,43 +715,92 @@ void drawStaticGrid(Gfx& gfx) {
   const DrawScope scope(gfx);
   displayFontEnsureLoaded(gfx);
   const int cx = radar::kCenterX;
-  const int cy = radar::kCenterY;
+  const int cy = radar::kCenterY - s_band_top;
   const int grid_r = radar::kGridOuterRadius;
 
   gfx.fillScreen(radar::kColorBackground);
   drawRings(cx, cy, grid_r);
   drawCrosshairs(cx, cy, grid_r, radar::kColorGrid);
   initPalette();
-  runway::drawLargeAirportRunways(gfx);
+  runway::drawLargeAirportRunways(gfx, s_band_top);
   drawCenterDot(cx, cy);
   drawCardinalLabels();
   drawScaleLabel(cx, cy, grid_r);
   gfx.setTextDatum(textdatum_t::top_left);
 }
 
+// The most the frame sprite may take: the 240x240 panel's full frame at 8bpp.
+// What the heap keeps beside it has to hold WiFi, the LAN config portal and
+// the ADS-B fetch, whose TLS connection allocates two 16,717 B record buffers.
+// A full 360x360 frame (129,600 B) left about 48 KB free before each fetch,
+// in no block over 29 KB, and every fetch failed in mbedtls_ssl_setup.
+constexpr int kFrameBudgetBytes = 240 * 240;
+
+/**
+ * Rows of the frame sprite: the whole radar when it fits the budget, otherwise
+ * the fewest equal horizontal bands that each do -- 120 rows at 360x360.
+ */
+int frameBandRows() {
+  const int frame_bytes = radar::kSize * radar::kSize;  // RGB332: 1 byte a pixel
+  if (frame_bytes <= kFrameBudgetBytes) {
+    return radar::kSize;
+  }
+  const int bands = (frame_bytes + kFrameBudgetBytes - 1) / kFrameBudgetBytes;
+  return (radar::kSize + bands - 1) / bands;
+}
+
 bool ensureFrameSprite() {
   if (s_frame_ready) {
     return true;
   }
+  // RGB332, one byte a pixel, on every panel: the frame is the largest single
+  // allocation this firmware makes, and at 16bpp it costs 115,204 B at 240x240
+  // and 259,200 B at 360x360 -- more than an ESP32-C3 can spare once WiFi and
+  // the ADS-B fetch are up. At 8bpp it is 57,602 B and 129,600 B.
+  //
+  // LovyanGFX's RGB332 is a true RGB format whose converter supports alpha
+  // blending. Palette depths go through copy_bit_affine instead, which masks raw
+  // bytes into index bits and silently corrupts every antialiased primitive we
+  // draw (fillSmoothCircle, drawWideLine), so there is deliberately no 4bpp
+  // fallback below this.
   s_frame.setColorDepth(lgfx::color_depth_t::rgb332_1Byte);
-  if (!s_frame.createSprite(radar::kSize, radar::kSize)) {
-    Serial.println("radar: frame sprite alloc failed");
-    return false;
+  const int rows = frameBandRows();
+  if (s_frame.createSprite(radar::kSize, rows)) {
+    Serial.printf("radar: frame sprite %dx%d @8bpp\n", radar::kSize, rows);
+    s_frame_ready = true;
+    return true;
   }
-  s_frame_ready = true;
-  return true;
+
+  Serial.println("radar: no frame sprite fits - drawing direct to panel");
+  return false;
 }
 
 // Double-buffered frame: composite the grid AND aircraft into the off-screen
-// sprite, then blit it to the panel in a single pushSprite. Because the panel
-// is updated in one pass, labels never show an erase/redraw gap — no flicker.
+// sprite, then blit it to the panel with pushSprite. Because every pixel goes
+// straight from the old frame to the new one, labels never show an
+// erase/redraw gap — no flicker.
+//
+// When the sprite holds a band rather than the whole radar, the same is done
+// band by band, top to bottom: each band is composited complete -- grid,
+// aircraft and labels -- before it is pushed. The aircraft are placed once for
+// the whole frame.
 void renderFrame() {
-  drawStaticGrid(s_frame);  // opens its own DrawScope(s_frame)
-  {
-    const DrawScope scope(s_frame);
-    drawAircraft();
+  placeAircraft();
+
+  const int band_rows = s_frame.height();
+  for (int top = 0; top < radar::kSize; top += band_rows) {
+    s_band_top = top;
+    drawStaticGrid(s_frame);  // opens its own DrawScope(s_frame)
+    {
+      const DrawScope scope(s_frame);
+      drawAircraft();
+    }
+    if (top == 0) {
+      displayWaitForFrameStart();  // once a frame, ahead of its first push
+    }
+    s_frame.pushSprite(0, top);
   }
-  s_frame.pushSprite(0, 0);
+  s_band_top = 0;
   tft.setTextDatum(textdatum_t::top_left);
 }
 
@@ -732,6 +818,7 @@ void radarDisplayDraw() {
   // Fallback when the sprite can't be allocated: draw straight to the panel.
   const DrawScope scope(tft);
   drawStaticGrid(tft);
+  placeAircraft();
   drawAircraft();
   tft.setTextDatum(textdatum_t::top_left);
 }
