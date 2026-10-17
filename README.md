@@ -42,6 +42,7 @@ The same portal runs on the setup AP and on the device’s LAN IP while connecte
 | Field | Purpose |
 |-------|---------|
 | **Latitude / Longitude** | Radar center and ADS-B query position (defaults in `config.h` until set) |
+| **Compass heading the top of the display faces** | Rotates the whole radar (N/E/S/W labels, crosshairs, aircraft, runways) so the map matches how the device is mounted. `0` = north at top, `90` = east at top. Get the number from your phone's Compass app, held pointing the same way as the top of the display |
 | **Display distances in miles** | Ring scale label in **mi** instead of **km** (e.g. `6mi` vs `10km`) |
 | **Show airport runways** | Major-airport runway overlay on the radar (off to hide) |
 
@@ -52,7 +53,7 @@ After a reset, the device reboots and shows the setup screen immediately (no “
 ### Grid
 
 - Dark blue background, subdued green rings and crosshairs
-- White **N / S / E / W** at the bezel; range label on the **east** spoke (ring 3 = ¾ of outer radius)
+- White **N / S / E / W** at the bezel (always upright; they move around the edge to follow the configured compass heading); range label on the **east** spoke (ring 3 = ¾ of outer radius)
 - White center dot
 
 Layout and colors: `include/ui/radar_theme.h`.
