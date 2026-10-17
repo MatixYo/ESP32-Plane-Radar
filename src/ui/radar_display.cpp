@@ -212,6 +212,7 @@ void offsetKmFromCenter(float lat, float lon, float* dx_km, float* dy_km,
   *dy_km =
       static_cast<float>(lat - services::location::lat()) * kKmPerDeg;
   *dist_km = sqrtf((*dx_km) * (*dx_km) + (*dy_km) * (*dy_km));
+  radar::rotateKmForHeading(dx_km, dy_km);
 }
 
 /**
@@ -569,9 +570,11 @@ void drawAircraft() {
     const size_t i = items[d].index;
     const int x = items[d].x;
     const int y = items[d].y;
-    drawSpeedVector(x, y, planes[i].nose_deg, planes[i].track_deg,
-                    planes[i].gs_knots, radar::kColorTrackVector);
-    drawHeadingTriangle(x, y, planes[i].nose_deg, radar::kColorAircraft);
+    const float nose_deg = radar::screenBearingDeg(planes[i].nose_deg);
+    const float track_deg = radar::screenBearingDeg(planes[i].track_deg);
+    drawSpeedVector(x, y, nose_deg, track_deg, planes[i].gs_knots,
+                    radar::kColorTrackVector);
+    drawHeadingTriangle(x, y, nose_deg, radar::kColorAircraft);
   }
   for (size_t d = 0; d < draw_count; ++d) {
     const size_t i = items[d].index;
@@ -639,10 +642,14 @@ void drawRings(int cx, int cy, int outer_radius) {
 }
 
 void drawCrosshairs(int cx, int cy, int radius, uint16_t color) {
-  s_draw->drawWideLine(cx, cy - radius, cx, cy + radius,
-                       radar::kGridStrokeHalfWidth, color);
-  s_draw->drawWideLine(cx - radius, cy, cx + radius, cy,
-                       radar::kGridStrokeHalfWidth, color);
+  // N-S spoke (i = 0) then E-W spoke (i = 1), rotated with the display heading.
+  for (int i = 0; i < 2; ++i) {
+    const float rad = radar::screenBearingDeg(i * 90.0f) * kDegToRad;
+    const int dx = static_cast<int>(lroundf(sinf(rad) * radius));
+    const int dy = static_cast<int>(lroundf(cosf(rad) * radius));
+    s_draw->drawWideLine(cx - dx, cy + dy, cx + dx, cy - dy,
+                         radar::kGridStrokeHalfWidth, color);
+  }
 }
 
 void drawCenterDot(int cx, int cy) {
@@ -650,15 +657,24 @@ void drawCenterDot(int cx, int cy) {
 }
 
 void drawCardinalLabels() {
-  const int cx = radar::kCenterX;
-  const int cy = radar::kCenterY;
-  const int edge = radar::kSize - 1;
+  static const char* const kNames[] = {"N", "E", "S", "W"};
+  const float edge_r = static_cast<float>(radar::kSize) * 0.5f;
 
-  drawCardinalLabel("N", cx, radar::kCardinalNorthOffsetY, textdatum_t::top_center);
-  drawCardinalLabel("S", cx, edge + radar::kCardinalSouthOffsetY,
-                    textdatum_t::bottom_center);
-  drawCardinalLabel("W", 0, cy, textdatum_t::middle_left);
-  drawCardinalLabel("E", edge, cy, textdatum_t::middle_right);
+  // Labels stay upright; only their position around the bezel rotates.
+  applyCardinalStyle();
+  const float half_h = static_cast<float>(s_draw->fontHeight()) * 0.5f;
+  for (int i = 0; i < 4; ++i) {
+    const float rad = radar::screenBearingDeg(i * 90.0f) * kDegToRad;
+    const float s = sinf(rad);
+    const float c = cosf(rad);
+    const float half_w = static_cast<float>(s_draw->textWidth(kNames[i])) * 0.5f;
+    // Keep the label box inside the round bezel at any angle.
+    const float r = edge_r - (half_w * fabsf(s) + half_h * fabsf(c)) +
+                    static_cast<float>(radar::kCardinalRadialOffsetPx);
+    drawCardinalLabel(kNames[i], radar::kCenterX + static_cast<int>(lroundf(s * r)),
+                      radar::kCenterY - static_cast<int>(lroundf(c * r)),
+                      textdatum_t::middle_center);
+  }
 }
 
 int scaleLabelAnchorX(int cx, int outer_radius) {

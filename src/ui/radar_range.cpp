@@ -5,6 +5,7 @@
 #include <Preferences.h>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace ui::radar {
@@ -15,13 +16,33 @@ constexpr char kPrefsNamespace[] = "planeradar";
 constexpr char kPrefsRangeKey[] = "rangeIdx";
 constexpr char kPrefsMilesKey[] = "useMiles";
 constexpr char kPrefsRunwaysKey[] = "showRwys";
+constexpr char kPrefsHeadingKey[] = "northDeg";
 constexpr uint8_t kDefaultRangeIndex = 1;  // 10 km ring
 constexpr float kKmPerMile = 1.609344f;
+constexpr float kDegToRad = 0.01745329252f;
 
 Preferences s_prefs;
 uint8_t s_range_index = kDefaultRangeIndex;
 bool s_use_miles = false;
 bool s_show_runways = true;
+uint16_t s_heading_deg = 0;
+float s_heading_sin = 0.0f;
+float s_heading_cos = 1.0f;
+
+void setHeading(uint16_t deg) {
+  s_heading_deg = deg % 360;
+  const float rad = static_cast<float>(s_heading_deg) * kDegToRad;
+  s_heading_sin = sinf(rad);
+  s_heading_cos = cosf(rad);
+}
+
+void saveHeading() {
+  if (!s_prefs.begin(kPrefsNamespace, false)) {
+    return;
+  }
+  s_prefs.putUShort(kPrefsHeadingKey, s_heading_deg);
+  s_prefs.end();
+}
 
 void saveRangeIndex() {
   if (!s_prefs.begin(kPrefsNamespace, false)) {
@@ -70,6 +91,7 @@ void rangeInit() {
       (saved < kRangePresetCount) ? saved : kDefaultRangeIndex;
   s_use_miles = s_prefs.getBool(kPrefsMilesKey, false);
   s_show_runways = s_prefs.getBool(kPrefsRunwaysKey, true);
+  setHeading(s_prefs.getUShort(kPrefsHeadingKey, 0));
   s_prefs.end();
 }
 
@@ -105,6 +127,32 @@ void saveRunwaysFromPortal(const char* checkbox_value) {
   Serial.printf("Runway overlay: %s\n", s_show_runways ? "on" : "off");
 }
 
+uint16_t headingDeg() { return s_heading_deg; }
+
+void saveHeadingFromPortal(const char* value) {
+  char* end = nullptr;
+  const float parsed = (value != nullptr) ? strtof(value, &end) : 0.0f;
+  if (end == nullptr || end == value || !std::isfinite(parsed)) {
+    Serial.println("Invalid heading in portal — keeping previous value");
+    return;
+  }
+  const long deg = lroundf(parsed);
+  setHeading(static_cast<uint16_t>(((deg % 360) + 360) % 360));
+  saveHeading();
+  Serial.printf("Display heading: %u deg\n", s_heading_deg);
+}
+
+void rotateKmForHeading(float* dx_km, float* dy_km) {
+  const float x = *dx_km;
+  const float y = *dy_km;
+  *dx_km = x * s_heading_cos - y * s_heading_sin;
+  *dy_km = x * s_heading_sin + y * s_heading_cos;
+}
+
+float screenBearingDeg(float true_bearing_deg) {
+  return true_bearing_deg - static_cast<float>(s_heading_deg);
+}
+
 void formatRing3Label(char* buf, size_t len, float ring3_km, bool use_miles) {
   if (use_miles) {
     const int mi = static_cast<int>(lroundf(ring3_km / kKmPerMile));
@@ -122,9 +170,11 @@ void formatCurrentRing3Label(char* buf, size_t len) {
 void unitsReset() {
   s_use_miles = false;
   s_show_runways = true;
+  setHeading(0);
   if (s_prefs.begin(kPrefsNamespace, false)) {
     s_prefs.remove(kPrefsMilesKey);
     s_prefs.remove(kPrefsRunwaysKey);
+    s_prefs.remove(kPrefsHeadingKey);
     s_prefs.end();
   }
 }

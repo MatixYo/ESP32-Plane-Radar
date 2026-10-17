@@ -82,6 +82,7 @@ void offsetKmFromCenter(float lat, float lon, float* dx_km, float* dy_km,
   *dy_km =
       static_cast<float>(lat - services::location::lat()) * kKmPerDeg;
   *dist_km = sqrtf((*dx_km) * (*dx_km) + (*dy_km) * (*dy_km));
+  radar::rotateKmForHeading(dx_km, dy_km);
 }
 
 void latLonToScreen(float lat, float lon, int* out_x, int* out_y) {

@@ -48,6 +48,17 @@ bool showRunways();
 /** WiFi portal checkbox: "T" = miles, otherwise km. */
 void saveMilesFromPortal(const char* checkbox_value);
 void saveRunwaysFromPortal(const char* checkbox_value);
+/**
+ * Compass bearing (0-359°) that the top of the display points toward.
+ * 0 = north up (default); 90 = device rotated so east is at the top.
+ */
+uint16_t headingDeg();
+/** WiFi portal number field; out-of-range values wrap to 0-359, invalid input is ignored. */
+void saveHeadingFromPortal(const char* value);
+/** Rotate an east/north offset (km) into the screen frame for the current heading. */
+void rotateKmForHeading(float* dx_km, float* dy_km);
+/** Convert a true bearing (0 = N, clockwise) into a bearing relative to screen-up. */
+float screenBearingDeg(float true_bearing_deg);
 void formatRing3Label(char* buf, size_t len, float ring3_km, bool use_miles);
 void formatCurrentRing3Label(char* buf, size_t len);
 /** Reset distance units to km (e.g. with WiFi credential wipe). */
