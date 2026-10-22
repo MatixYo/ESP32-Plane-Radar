@@ -233,6 +233,7 @@ void formatAltitudeTag(const JsonObject& plane, char* out, size_t out_len) {
 
 void fillTagFields(Aircraft* ac, const JsonObject& plane) {
   copyJsonStringTrimmed(plane, "flight", ac->callsign, sizeof(ac->callsign));
+  ac->has_flight_callsign = ac->callsign[0] != '\0';
   if (ac->callsign[0] == '\0') {
     copyJsonStringTrimmed(plane, "hex", ac->callsign, sizeof(ac->callsign));
   }

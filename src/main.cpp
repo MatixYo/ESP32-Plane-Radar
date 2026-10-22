@@ -9,6 +9,7 @@
 #include "hardware/display.h"
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
+#include "services/route_client.h"
 #include "services/wifi_setup.h"
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
@@ -59,6 +60,11 @@ void adsbFetchTask(void*) {
       services::adsb::fetchUpdate(services::location::lat(),
                                   services::location::lon(),
                                   ui::radar::fetchRadiusKm());
+      if (ui::radar::showDestination()) {
+        services::route::fetchPending(
+            services::location::lat(), services::location::lon(),
+            ui::radar::rangeCurrent().outer_km, config::kRouteLookupsPerCycle);
+      }
     }
     vTaskDelay(pdMS_TO_TICKS(config::kAdsbFetchIntervalMs));
   }
@@ -80,6 +86,7 @@ void setup() {
   services::location::init();
   ui::radar::rangeInit();
   services::adsb::init();
+  services::route::init();
 
   if (wifiSetupConnect()) {
     showRadarIfConnected();

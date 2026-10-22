@@ -44,6 +44,7 @@ The same portal runs on the setup AP and on the device’s LAN IP while connecte
 | **Latitude / Longitude** | Radar center and ADS-B query position (defaults in `config.h` until set) |
 | **Display distances in miles** | Ring scale label in **mi** instead of **km** (e.g. `6mi` vs `10km`) |
 | **Show airport runways** | Major-airport runway overlay on the radar (off to hide) |
+| **Show flight destination** | Adds a green destination line (e.g. `to LHR`) to aircraft tags (on by default) |
 
 After a reset, the device reboots and shows the setup screen immediately (no “Connecting” loop on stale credentials).
 
@@ -82,6 +83,17 @@ Preset and miles/km choice persist across reboot (`planeradar` NVS namespace).
 
 As range decreases (or aircraft approach), targets move inward; beyond-ring dots become full symbols when they cross the outer ring.
 
+### Flight destination
+
+ADS-B doesn't broadcast where a flight is going, so the firmware looks up each aircraft's callsign on [adsbdb.com](https://www.adsbdb.com/) (`https://api.adsbdb.com/v0/callsign/<callsign>`, free, no key) and adds a fourth, green line to its tag: `to Amsterdam`. City names are shown when they fit (up to `kRouteMaxCityChars`, 15) and are folded to plain ASCII (`Zürich` → `Zurich`) because the tag font has no accented letters; otherwise it falls back to the airport code (`to AMS`; ICAO if there is no IATA).
+
+- Only aircraft **inside the outer ring** (the ones that get a tag) are looked up, nearest first, at most `kRouteLookupsPerCycle` (2) per ADS-B cycle, on the same background task as the ADS-B fetch.
+- Results are cached (48 callsigns; found 2 h, unknown 30 min, errors 30 s), so a plane is looked up once, not every refresh.
+- Not every callsign has a route (general aviation, military, charters, or flights missing from the database); those just show no destination line.
+- In `config.h`: `kRouteUseCityNames = false` shows airport codes instead of city names, and `kRouteShowOrigin = true` adds a `from Thessaloniki` line above the destination.
+- The serial log prints the full route and heap headroom, e.g. `route: TRA91T Thessaloniki to Amsterdam (SKG>AMS) [heap free 112000, lowest 98000]`. On a Super Mini, if "lowest" drops under ~30000, tell the maintainer: the extra TLS session is tight on the C3.
+- Callsigns are sent to adsbdb.com. Untick **Show flight destination** in the setup portal to turn lookups off.
+
 ### ADS-B
 
 - Source: `https://opendata.adsb.fi/api/v3/`
@@ -101,6 +113,7 @@ Edit **`include/config.h`** for hardware and behavior:
 | Display SPI | pins, `kDisplayInvert`, `kDisplayRgbOrder`, `kDisplaySpiWriteHz` |
 | Default location | `kDefaultRadarLat`, `kDefaultRadarLon` (until portal overrides) |
 | ADS-B | `kAdsbFetchIntervalMs`, `kAdsbShowGroundAircraft` |
+| Destination | `kRouteLookupsPerCycle`, `kRouteUseCityNames`, `kRouteMaxCityChars`, `kRouteShowOrigin` |
 
 Range presets: `include/ui/radar_range.h` (`kRangePresets`).
 
@@ -125,6 +138,8 @@ include/
     wifi_setup.h
     radar_location.h
     adsb_client.h
+    route_client.h
+    ascii_fold.h
 data/
   ui_font.vlw              — embedded smooth UI font (Noto Sans Bold)
 scripts/

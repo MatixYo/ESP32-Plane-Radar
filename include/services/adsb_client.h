@@ -15,6 +15,7 @@ struct Aircraft {
    *  Added to the elapsed time when dead-reckoning so the drawn position
    *  reflects the estimated current location, not the already-stale fix. */
   uint32_t pos_age_ms;
+  bool has_flight_callsign;
   char callsign[9];
   char type[5];
   char alt[12];

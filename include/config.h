@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include <driver/gpio.h>
@@ -56,6 +57,10 @@ constexpr unsigned long kAdsbFetchIntervalMs = 5000;
 constexpr unsigned long kRadarRedrawIntervalMs = 250;
 /** Legacy scale unused — fetch uses radar::fetchRadiusKm() to screen edge. */
 constexpr float kAdsbFetchRadiusScale = 1.0f;
+constexpr size_t kRouteLookupsPerCycle = 2;
+constexpr bool kRouteUseCityNames = true;
+constexpr size_t kRouteMaxCityChars = 15;
+constexpr bool kRouteShowOrigin = false;
 /** false = hide aircraft with alt_baro "ground"; true = show them too. */
 constexpr bool kAdsbShowGroundAircraft = false;
 

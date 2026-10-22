@@ -81,6 +81,9 @@ constexpr uint8_t kTagTypeB = 0;
 constexpr uint8_t kTagAltR = 90;
 constexpr uint8_t kTagAltG = 200;
 constexpr uint8_t kTagAltB = 255;
+constexpr uint8_t kTagRouteR = 110;
+constexpr uint8_t kTagRouteG = 230;
+constexpr uint8_t kTagRouteB = 110;
 constexpr uint8_t kRunwayR = 56;
 constexpr uint8_t kRunwayG = 150;
 constexpr uint8_t kRunwayB = 170;
@@ -97,6 +100,7 @@ extern uint16_t kColorAircraft;
 extern uint16_t kColorTrackVector;
 extern uint16_t kColorTagType;
 extern uint16_t kColorTagAltitude;
+extern uint16_t kColorTagRoute;
 extern uint16_t kColorRunway;
 extern uint16_t kColorRunwayLabel;
 
