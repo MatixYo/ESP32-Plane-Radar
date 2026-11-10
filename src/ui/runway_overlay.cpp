@@ -1,5 +1,6 @@
 #include "ui/runway_overlay.h"
 
+#include <Arduino.h>
 #include <lgfx/v1/lgfx_fonts.hpp>
 
 #include <cmath>
@@ -178,7 +179,17 @@ void drawBoldRunwayLabel(lgfx::LGFXBase& gfx, const char* ident, int mx, int my)
   gfx.drawString(ident, mx, my);
 }
 
-bool drawRunwayLine(lgfx::LGFXBase& gfx, const data::large_airports::Runway& rw) {
+struct RunwaySeg {
+  int x0;
+  int y0;
+  int x1;
+  int y1;
+};
+
+constexpr size_t kMaxRunwaySegs = 128;
+
+/** Screen end points of a runway; false if it lies outside the radar disc. */
+bool runwayScreenSegment(const data::large_airports::Runway& rw, RunwaySeg* seg) {
   const float le_lat = e7ToDeg(rw.le_lat_e7);
   const float le_lon = e7ToDeg(rw.le_lon_e7);
   const float he_lat = e7ToDeg(rw.he_lat_e7);
@@ -195,12 +206,51 @@ bool drawRunwayLine(lgfx::LGFXBase& gfx, const data::large_airports::Runway& rw)
     return false;
   }
 
+  // At wide ranges a runway can be only a few pixels long. Stretch it about
+  // its middle (keeping its direction) so airports stay easy to spot.
+  const float fdx = static_cast<float>(x1 - x0);
+  const float fdy = static_cast<float>(y1 - y0);
+  const float len = sqrtf(fdx * fdx + fdy * fdy);
+  const float min_len = static_cast<float>(radar::kRunwayMinLenPx);
+  if (len < min_len) {
+    const float mx = (x0 + x1) * 0.5f;
+    const float my = (y0 + y1) * 0.5f;
+    const float ux = len < 0.5f ? 1.0f : fdx / len;
+    const float uy = len < 0.5f ? 0.0f : fdy / len;
+    const float half = min_len * 0.5f;
+    x0 = static_cast<int>(lroundf(mx - ux * half));
+    y0 = static_cast<int>(lroundf(my - uy * half));
+    x1 = static_cast<int>(lroundf(mx + ux * half));
+    y1 = static_cast<int>(lroundf(my + uy * half));
+  }
+
   clipPointToOuterRing(x0, y0, &x1, &y1);
   clipPointToOuterRing(x1, y1, &x0, &y0);
 
-  gfx.drawWideLine(x0, y0, x1, y1, radar::kRunwayLineHalfWidth,
-                   radar::kColorRunway);
+  seg->x0 = x0;
+  seg->y0 = y0;
+  seg->x1 = x1;
+  seg->y1 = y1;
   return true;
+}
+
+/** Bright dot plus a short trail running from one runway end to the other. */
+void drawRunwayStrobe(lgfx::LGFXBase& gfx, const RunwaySeg& seg, uint16_t color,
+                      float phase) {
+  constexpr float kTrailOffset[3] = {0.0f, 0.12f, 0.24f};
+  for (int i = 0; i < 3; ++i) {
+    const float t = phase - kTrailOffset[i];
+    if (t < 0.0f) {
+      continue;
+    }
+    int r = radar::kRunwayStrobeRadiusPx - i;
+    if (r < 1) {
+      r = 1;
+    }
+    const int x = seg.x0 + static_cast<int>(lroundf(static_cast<float>(seg.x1 - seg.x0) * t));
+    const int y = seg.y0 + static_cast<int>(lroundf(static_cast<float>(seg.y1 - seg.y0) * t));
+    gfx.fillCircle(x, y, r, color);
+  }
 }
 
 void offsetLabelFromCenter(int ax, int ay, int* lx, int* ly) {
@@ -257,6 +307,8 @@ void drawLargeAirportRunways(lgfx::LGFXBase& gfx) {
 
   uint16_t label_airports[kMaxAirportLabels];
   size_t label_count = 0;
+  RunwaySeg segs[kMaxRunwaySegs];
+  size_t seg_count = 0;
 
   for (size_t i = 0; i < data::large_airports::kAirportCount; ++i) {
     s_in_range[i] = false;
@@ -278,13 +330,36 @@ void drawLargeAirportRunways(lgfx::LGFXBase& gfx) {
     if (!s_in_range[ap_idx]) {
       continue;
     }
-    if (!drawRunwayLine(gfx, rw)) {
+    RunwaySeg seg;
+    if (!runwayScreenSegment(rw, &seg)) {
       continue;
+    }
+    if (seg_count < kMaxRunwaySegs) {
+      segs[seg_count++] = seg;
     }
     if (!s_label_pending[ap_idx] && label_count < kMaxAirportLabels) {
       s_label_pending[ap_idx] = true;
       label_airports[label_count++] = ap_idx;
     }
+  }
+
+  // Outlines first, then bodies, so a crossing runway is never cut by another's
+  // outline; strobes go on top of everything.
+  for (size_t i = 0; i < seg_count; ++i) {
+    gfx.drawWideLine(segs[i].x0, segs[i].y0, segs[i].x1, segs[i].y1,
+                     radar::kRunwayOutlineHalfWidth, radar::kColorBackground);
+  }
+  for (size_t i = 0; i < seg_count; ++i) {
+    gfx.drawWideLine(segs[i].x0, segs[i].y0, segs[i].x1, segs[i].y1,
+                     radar::kRunwayLineHalfWidth, radar::kColorRunway);
+  }
+  const uint16_t strobe_color = gfx.color565(
+      radar::kRunwayStrobeR, radar::kRunwayStrobeG, radar::kRunwayStrobeB);
+  const float phase =
+      static_cast<float>(millis() % radar::kRunwayStrobePeriodMs) /
+      static_cast<float>(radar::kRunwayStrobePeriodMs);
+  for (size_t i = 0; i < seg_count; ++i) {
+    drawRunwayStrobe(gfx, segs[i], strobe_color, phase);
   }
 
   if (label_count == 0) {

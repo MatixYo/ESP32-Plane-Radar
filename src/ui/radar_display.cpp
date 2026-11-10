@@ -14,6 +14,7 @@
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
 #include "ui/aircraft_names.h"
+#include "ui/marquee.h"
 #include "ui/radar_range.h"
 #include "ui/radar_theme.h"
 #include "ui/runway_overlay.h"
@@ -413,9 +414,15 @@ void drawSpeedVector(int cx, int cy, float heading_deg, float track_deg,
                        color);
 }
 
+// Busiest zoom (25 km preset, shown as 16 mi): shrink tag text 15% so the
+// extra aircraft fit.
+float tagFontScale() {
+  return radar::rangeCurrent().ring3_km > 24.0f ? 0.85f : 1.0f;
+}
+
 void applyTagStyle() {
   if (s_tag_use_vlw) {
-    displayFontSetSmoothSize(*s_draw, s_tag_vlw_size);
+    displayFontSetSmoothSize(*s_draw, s_tag_vlw_size * tagFontScale());
   } else {
     displayFontSetBitmap(*s_draw, s_tag_gfx);
   }
@@ -521,11 +528,15 @@ void sortBeyondDotsFarFirst(BeyondDotDrawItem* items, size_t count) {
   }
 }
 
-bool s_flash_on = false;  // flips every redraw -> about 2 flashes per second
+bool s_flash_on = false;  // flips every 250 ms -> about 2 flashes per second
+unsigned long s_flash_last_ms = 0;
 
 void drawAircraft() {
   initLabelMetrics();
-  s_flash_on = !s_flash_on;
+  if (millis() - s_flash_last_ms >= 250) {
+    s_flash_last_ms = millis();
+    s_flash_on = !s_flash_on;
+  }
 
   // Snapshot under the adsb lock (the fetch may run on another thread).
   static services::adsb::Aircraft planes[services::adsb::kMaxAircraft];
@@ -730,6 +741,7 @@ void renderFrame() {
   {
     const DrawScope scope(s_frame);
     drawAircraft();
+    marqueeDraw(s_frame);
   }
   s_frame.pushSprite(0, 0);
   tft.setTextDatum(textdatum_t::top_left);
@@ -750,6 +762,7 @@ void radarDisplayDraw() {
   const DrawScope scope(tft);
   drawStaticGrid(tft);
   drawAircraft();
+  marqueeDraw(tft);
   tft.setTextDatum(textdatum_t::top_left);
 }
 

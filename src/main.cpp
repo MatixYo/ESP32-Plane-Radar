@@ -10,8 +10,11 @@
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
 #include "services/wifi_setup.h"
+#include "ui/marquee.h"
+#include "ui/marquee_config.h"
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
+#include "ui/splash_screen.h"
 #include "ui/status_screens.h"
 
 namespace {
@@ -74,6 +77,7 @@ void setup() {
 
   bootButtonInit();
   displayInit();
+  ui::splashScreenShow();
   if (wifiShowsSetupScreenOnBoot()) {
     statusScreenPortal();
   }
@@ -117,7 +121,9 @@ void loop() {
     g_wifi_down_since = 0;
     if (!g_radar_visible) {
       showRadarIfConnected();
-    } else if (millis() - g_last_redraw_ms >= config::kRadarRedrawIntervalMs) {
+    } else if (millis() - g_last_redraw_ms >=
+               (ui::marqueeActive() ? ui::marquee::kRedrawIntervalMs
+                                    : config::kRadarRedrawIntervalMs)) {
       // Redraw at 4 Hz with dead-reckoned positions; the ADS-B fetch runs on
       // its own task (adsbFetchTask).
       g_last_redraw_ms = millis();

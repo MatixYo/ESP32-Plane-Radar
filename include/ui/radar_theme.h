@@ -46,8 +46,18 @@ constexpr float kAircraftTrackLengthScale = 1.5f / 5.0f;
 /** drawWideLine half-width for speed vectors (~2 px total). */
 constexpr float kAircraftTrackLineHalfWidth = 1.0f;
 
-constexpr float kRunwayLineWidthPx = 2.0f;
+constexpr float kRunwayLineWidthPx = 3.0f;
 constexpr float kRunwayLineHalfWidth = kRunwayLineWidthPx * 0.5f;
+/** Dark outline drawn under each runway so it separates from aircraft and grid. */
+constexpr float kRunwayOutlineHalfWidth = 2.5f;
+/** Runways shorter than this on screen are stretched about their middle (px). */
+constexpr int kRunwayMinLenPx = 12;
+/** Strobe: a bright dot with a short trail sweeping along each runway. */
+constexpr int kRunwayStrobeRadiusPx = 3;
+constexpr unsigned long kRunwayStrobePeriodMs = 1000;
+constexpr uint8_t kRunwayStrobeR = 0;
+constexpr uint8_t kRunwayStrobeG = 255;
+constexpr uint8_t kRunwayStrobeB = 0;
 constexpr int kRunwayLabelHeightPx = kCardinalLabelHeightPx;
 constexpr int kRunwayLabelGapPx = 3;
 /** Gap from triangle edge to tag block (px). */
@@ -81,9 +91,9 @@ constexpr uint8_t kTagTypeB = 0;
 constexpr uint8_t kTagAltR = 90;
 constexpr uint8_t kTagAltG = 200;
 constexpr uint8_t kTagAltB = 255;
-constexpr uint8_t kRunwayR = 56;
-constexpr uint8_t kRunwayG = 150;
-constexpr uint8_t kRunwayB = 170;
+constexpr uint8_t kRunwayR = 200;
+constexpr uint8_t kRunwayG = 235;
+constexpr uint8_t kRunwayB = 235;
 /** Lighter teal for ICAO labels (vs runway lines). */
 constexpr uint8_t kRunwayLabelR = 110;
 constexpr uint8_t kRunwayLabelG = 210;
