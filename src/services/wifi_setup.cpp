@@ -60,6 +60,8 @@ constexpr char kWifiPrefsNamespace[] = "wifi";
 constexpr char kPrefsForcePortalKey[] = "portal";
 
 bool s_force_config_portal = false;
+bool s_boot_prompt_active = false;     // true only during the boot-time connect
+bool s_change_wifi_requested = false;  // set when BOOT is tapped in that window
 WiFiManager s_wm;
 bool s_wm_configured = false;
 
@@ -71,7 +73,51 @@ bool wifiLinkUp();
 constexpr int kCoordParamLen = 20;
 constexpr char kCoordInputAttrs[] =
     " type=\"number\" step=\"0.000001\"";
+const char kLocationSearchHtml[] = R"HTML(
+<div style="margin:12px 0">
+  <label for="loc_q"><b>Option 1: search by postcode, address or place</b></label>
+  <input id="loc_q" type="text" placeholder="e.g. SW1A 1AA, 10 Downing St, Heathrow"
+         onkeydown="if(event.key==='Enter'){event.preventDefault();locSearch();}">
+  <button type="button" onclick="locSearch()">Search</button>
+  <div id="loc_msg" style="margin:6px 0"></div>
+  <div id="loc_res"></div>
+</div>
+<div style="margin:12px 0"><b>Option 2: enter coordinates directly</b></div>
+<script>
+function locSearch(){
+  var q=document.getElementById('loc_q').value.trim();
+  var msg=document.getElementById('loc_msg');
+  var res=document.getElementById('loc_res');
+  res.textContent='';
+  if(!q){msg.textContent='Type a place name first.';return;}
+  msg.textContent='Searching...';
+  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=5&q='+encodeURIComponent(q))
+    .then(function(r){return r.json();})
+    .then(function(list){
+      if(!list.length){msg.textContent='No matches. Try a different name.';return;}
+      msg.textContent='Tap a result to use it:';
+      list.forEach(function(p){
+        var b=document.createElement('button');
+        b.type='button';
+        b.textContent=p.display_name;
+        b.style.margin='4px 0';
+        b.onclick=function(){
+          document.getElementById('radar_lat').value=parseFloat(p.lat).toFixed(6);
+          document.getElementById('radar_lon').value=parseFloat(p.lon).toFixed(6);
+          msg.textContent='Location set. Press Save below.';
+          res.textContent='';
+        };
+        res.appendChild(b);
+      });
+    })
+    .catch(function(){
+      msg.textContent='No internet on this connection. Type the latitude and longitude below instead.';
+    });
+}
+</script>
+)HTML";
 
+WiFiManagerParameter s_param_locsearch(kLocationSearchHtml);
 WiFiManagerParameter s_param_lat("radar_lat", "Latitude (deg)", "0",
                                 kCoordParamLen, kCoordInputAttrs);
 WiFiManagerParameter s_param_lon("radar_lon", "Longitude (deg)", "0",
@@ -113,6 +159,7 @@ void onPortalParamsSaved() {
 
 void attachPortalParams(WiFiManager& wm) {
   refreshPortalParamValues();
+  wm.addParameter(&s_param_locsearch);
   wm.addParameter(&s_param_lat);
   wm.addParameter(&s_param_lon);
   wm.addParameter(&s_param_miles);
@@ -276,13 +323,19 @@ void startStaConnect(const String& ssid, const String& pass) {
   }
 }
 
-bool waitForLinkWithUi(const char* ssid_for_ui, unsigned long attempt_ms) {
-  const unsigned long deadline = millis() + attempt_ms;
+bool waitForLinkWithUi(const char* ssid_for_ui, unsigned long attempt_ms,
+                       unsigned long min_ms) {
+  const unsigned long start = millis();
+  const unsigned long deadline = start + attempt_ms;
   while (millis() < deadline) {
-    if (wifiLinkUp()) {
+    if (wifiLinkUp() && millis() - start >= min_ms) {
       return true;
     }
     bootButtonPollLongPress();
+    if (s_boot_prompt_active && bootButtonConsumeTap()) {
+      s_change_wifi_requested = true;
+      return false;
+    }
     statusScreenConnectingTick();
     delay(config::kWifiConnectingFrameMs);
   }
@@ -310,8 +363,13 @@ bool tryConnectWithUi(const String& ssid, const String& pass, bool show_ui) {
 
     startStaConnect(ssid, pass);
 
-    if (waitForLinkWithUi(ui_ssid, config::kWifiConnectAttemptMs)) {
+    const unsigned long min_ms =
+        (s_boot_prompt_active && attempt == 1) ? config::kWifiChangePromptMs : 0;
+    if (waitForLinkWithUi(ui_ssid, config::kWifiConnectAttemptMs, min_ms)) {
       return true;
+    }
+    if (s_change_wifi_requested) {
+      return false;
     }
   }
 
@@ -487,11 +545,34 @@ bool wifiSetupConnect() {
     return true;
   }
 
-  if (storedWifiCredentials() && connectSavedNetwork(true)) {
-    WiFi.setAutoReconnect(true);
-    Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
-                  WiFi.localIP().toString().c_str());
-    return true;
+  if (storedWifiCredentials()) {
+    bootButtonConsumeTap();  // discard any stale tap
+    s_change_wifi_requested = false;
+    s_boot_prompt_active = true;
+    Serial.println("Tap BOOT now to choose a different WiFi network");
+    const bool connected = connectSavedNetwork(true);
+    s_boot_prompt_active = false;
+
+    if (connected) {
+      WiFi.setAutoReconnect(true);
+      Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
+                    WiFi.localIP().toString().c_str());
+      return true;
+    }
+
+    if (s_change_wifi_requested) {
+      s_change_wifi_requested = false;
+      Serial.println("BOOT tapped - opening WiFi setup portal");
+      if (openConfigPortal() && wifiLinkUp()) {
+        WiFi.setAutoReconnect(true);
+        Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
+                      WiFi.localIP().toString().c_str());
+        return true;
+      }
+      Serial.println("WiFi connection failed");
+      statusScreenConnectFailed();
+      return false;
+    }
   }
 
   if (storedWifiCredentials()) {

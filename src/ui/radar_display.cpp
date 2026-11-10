@@ -6,12 +6,14 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 
 #include "config.h"
 #include "hardware/display.h"
 #include "hardware/display_font.h"
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
+#include "ui/aircraft_names.h"
 #include "ui/radar_range.h"
 #include "ui/radar_theme.h"
 #include "ui/runway_overlay.h"
@@ -29,6 +31,8 @@ uint16_t kColorTagType = 0x5DFF;
 uint16_t kColorTagAltitude = 0xFFE0;
 uint16_t kColorRunway = 0x4D5F;
 uint16_t kColorRunwayLabel = 0x7DFF;
+uint16_t kColorOverhead = 0x801F;
+uint16_t kColorTagAirline = 0xFFFF;
 
 }  // namespace radar
 
@@ -196,6 +200,16 @@ void initPalette() {
       tft.color565(radar::kRunwayR, radar::kRunwayG, radar::kRunwayB);
   radar::kColorRunwayLabel = tft.color565(radar::kRunwayLabelR, radar::kRunwayLabelG,
                                           radar::kRunwayLabelB);
+  // Same R/B handling as the red aircraft symbol.
+  if (config::kDisplayRgbOrder) {
+    radar::kColorOverhead =
+        tft.color565(radar::kOverheadB, radar::kOverheadG, radar::kOverheadR);
+  } else {
+    radar::kColorOverhead =
+        tft.color565(radar::kOverheadR, radar::kOverheadG, radar::kOverheadB);
+  }
+  radar::kColorTagAirline = tft.color565(radar::kTagAirlineR, radar::kTagAirlineG,
+                                         radar::kTagAirlineB);
 }
 
 constexpr float kKmPerDeg = 111.0f;
@@ -407,37 +421,43 @@ void applyTagStyle() {
   }
 }
 
-int measureTagBlockWidth(const services::adsb::Aircraft& plane) {
-  applyTagStyle();
-  int max_w = 0;
-  if (plane.callsign[0] != '\0') {
-    const int w = s_draw->textWidth(plane.callsign);
-    if (w > max_w) {
-      max_w = w;
-    }
-  }
-  if (plane.type[0] != '\0') {
-    const int w = s_draw->textWidth(plane.type);
-    if (w > max_w) {
-      max_w = w;
-    }
-  }
-  if (plane.alt[0] != '\0') {
-    const int w = s_draw->textWidth(plane.alt);
-    if (w > max_w) {
-      max_w = w;
-    }
-  }
-  return max_w;
-}
-
-void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
+void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane,
+                     bool flash_purple) {
   initTagLabelMetrics();
   applyTagStyle();
 
+  struct TagLine {
+    char text[24];
+    uint16_t color;
+  };
+  TagLine lines[4];
+  int n = 0;
+  auto add = [&](const char* text, uint16_t color) {
+    if (text == nullptr || text[0] == '\0' || n >= 4) {
+      return;
+    }
+    strncpy(lines[n].text, text, sizeof(lines[n].text) - 1);
+    lines[n].text[sizeof(lines[n].text) - 1] = '\0';
+    lines[n].color = color;
+    ++n;
+  };
+  add(plane.callsign, flash_purple ? radar::kColorOverhead : radar::kColorLabel);
+  add(aircraftnames::airlineFromCallsign(plane.callsign), radar::kColorTagAirline);
+  add(aircraftnames::modelFromType(plane.type), radar::kColorTagType);
+  add(plane.alt, radar::kColorTagAltitude);
+  if (n == 0) {
+    return;
+  }
+
   const int line_h = s_draw->fontHeight();
-  const int block_w = measureTagBlockWidth(plane);
-  const int block_h = line_h * 3;
+  int block_w = 0;
+  for (int i = 0; i < n; ++i) {
+    const int w = s_draw->textWidth(lines[i].text);
+    if (w > block_w) {
+      block_w = w;
+    }
+  }
+  const int block_h = line_h * n;
   int ly = y - block_h / 2;
 
   const int symbol_half =
@@ -456,21 +476,10 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   }
   ly = std::max(1, std::min(ly, radar::kSize - block_h - 1));
 
-  if (plane.callsign[0] != '\0') {
-    s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
-    s_draw->drawString(plane.callsign, anchor_x, ly);
-  }
-  ly += line_h;
-
-  if (plane.type[0] != '\0') {
-    s_draw->setTextColor(radar::kColorTagType, radar::kColorBackground);
-    s_draw->drawString(plane.type, anchor_x, ly);
-  }
-  ly += line_h;
-
-  if (plane.alt[0] != '\0') {
-    s_draw->setTextColor(radar::kColorTagAltitude, radar::kColorBackground);
-    s_draw->drawString(plane.alt, anchor_x, ly);
+  for (int i = 0; i < n; ++i) {
+    s_draw->setTextColor(lines[i].color, radar::kColorBackground);
+    s_draw->drawString(lines[i].text, anchor_x, ly);
+    ly += line_h;
   }
 }
 
@@ -479,6 +488,7 @@ struct AircraftDrawItem {
   int x = 0;
   int y = 0;
   int dist_sq = 0;
+  bool overhead = false;
 };
 
 struct BeyondDotDrawItem {
@@ -511,8 +521,11 @@ void sortBeyondDotsFarFirst(BeyondDotDrawItem* items, size_t count) {
   }
 }
 
+bool s_flash_on = false;  // flips every redraw -> about 2 flashes per second
+
 void drawAircraft() {
   initLabelMetrics();
+  s_flash_on = !s_flash_on;
 
   // Snapshot under the adsb lock (the fetch may run on another thread).
   static services::adsb::Aircraft planes[services::adsb::kMaxAircraft];
@@ -544,6 +557,7 @@ void drawAircraft() {
       items[draw_count].x = x;
       items[draw_count].y = y;
       items[draw_count].dist_sq = distSqFromCenter(x, y);
+      items[draw_count].overhead = dist_km <= radar::kOverheadDistanceKm;
       ++draw_count;
       continue;
     }
@@ -569,13 +583,16 @@ void drawAircraft() {
     const size_t i = items[d].index;
     const int x = items[d].x;
     const int y = items[d].y;
+    const bool purple = items[d].overhead && s_flash_on;
     drawSpeedVector(x, y, planes[i].nose_deg, planes[i].track_deg,
                     planes[i].gs_knots, radar::kColorTrackVector);
-    drawHeadingTriangle(x, y, planes[i].nose_deg, radar::kColorAircraft);
+    drawHeadingTriangle(x, y, planes[i].nose_deg,
+                        purple ? radar::kColorOverhead : radar::kColorAircraft);
   }
   for (size_t d = 0; d < draw_count; ++d) {
     const size_t i = items[d].index;
-    drawAircraftTag(items[d].x, items[d].y, planes[i]);
+    drawAircraftTag(items[d].x, items[d].y, planes[i],
+                    items[d].overhead && s_flash_on);
   }
 }
 

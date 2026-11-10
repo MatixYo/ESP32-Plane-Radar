@@ -12,6 +12,8 @@ constexpr char kPortalIp[] = "192.168.4.1";
 /** mDNS host (no ".local" suffix); browser: http://plane-radar.local */
 constexpr char kPortalHostname[] = "plane-radar";
 constexpr char kPortalHostUrl[] = "plane-radar.local";
+/** Boot: how long the "tap BOOT to change WiFi" window stays open (ms). */
+constexpr unsigned long kWifiChangePromptMs = 4000;
 
 /** Per-attempt STA connect wait (ms); retried kWifiConnectAttempts times. */
 constexpr unsigned long kWifiConnectAttemptMs = 15000;
@@ -23,18 +25,30 @@ constexpr unsigned long kWifiDownGraceMs = 4000;
 /** Minimum interval between background reconnect tries. */
 constexpr unsigned long kWifiReconnectIntervalMs = 15000;
 
-// --- BOOT button (ESP32-C3 Super Mini, active LOW) ---
-constexpr gpio_num_t kBootPin = GPIO_NUM_9;
+// --- BOOT button (active LOW) ---
+#ifdef BOARD_CLASSIC_ESP32
+constexpr gpio_num_t kBootPin = GPIO_NUM_0;  // Freenove / classic ESP32 BOOT button
+#else
+constexpr gpio_num_t kBootPin = GPIO_NUM_9;  // ESP32-C3 Super Mini
+#endif
 constexpr unsigned long kBootResetHoldMs = 3000UL;
 /** Ignore BOOT taps shorter than this (debounce). */
 constexpr unsigned long kBootTapMinMs = 40UL;
 
 // --- Display: GC9A01 1.28" round 240×240 (SPI) ---
+#ifdef BOARD_CLASSIC_ESP32
+constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_26;
+constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_5;
+constexpr gpio_num_t kDisplayPinDc = GPIO_NUM_27;
+constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_23;  // display SDA
+constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_18;  // display SCL
+#else
 constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_0;
 constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_1;
 constexpr gpio_num_t kDisplayPinDc = GPIO_NUM_10;
 constexpr gpio_num_t kDisplayPinMosi = GPIO_NUM_3;  // display SDA
 constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_4;  // display SCL
+#endif
 
 constexpr int kDisplayWidth = 240;
 constexpr int kDisplayHeight = 240;

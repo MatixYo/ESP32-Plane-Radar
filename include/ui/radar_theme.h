@@ -88,6 +88,15 @@ constexpr uint8_t kRunwayB = 170;
 constexpr uint8_t kRunwayLabelR = 110;
 constexpr uint8_t kRunwayLabelG = 210;
 constexpr uint8_t kRunwayLabelB = 230;
+/** Purple flash when an aircraft is directly overhead. */
+constexpr uint8_t kOverheadR = 170;
+constexpr uint8_t kOverheadG = 0;
+constexpr uint8_t kOverheadB = 255;
+constexpr float kOverheadDistanceKm = 2.0f;
+/** Airline line in the aircraft tag. */
+constexpr uint8_t kTagAirlineR = 200;
+constexpr uint8_t kTagAirlineG = 200;
+constexpr uint8_t kTagAirlineB = 200;
 
 extern uint16_t kColorBackground;
 extern uint16_t kColorGrid;
@@ -99,5 +108,7 @@ extern uint16_t kColorTagType;
 extern uint16_t kColorTagAltitude;
 extern uint16_t kColorRunway;
 extern uint16_t kColorRunwayLabel;
+extern uint16_t kColorOverhead;
+extern uint16_t kColorTagAirline;
 
 }  // namespace ui::radar
