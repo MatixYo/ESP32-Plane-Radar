@@ -11,10 +11,10 @@
 #include "services/radar_location.h"
 #include "services/wifi_setup.h"
 #include "ui/marquee.h"
+#include "ui/photo_splash.h"
 #include "ui/marquee_config.h"
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
-#include "ui/splash_screen.h"
 #include "ui/status_screens.h"
 
 namespace {
@@ -77,7 +77,7 @@ void setup() {
 
   bootButtonInit();
   displayInit();
-  ui::splashScreenShow();
+  ui::photoSplashShow();
   if (wifiShowsSetupScreenOnBoot()) {
     statusScreenPortal();
   }

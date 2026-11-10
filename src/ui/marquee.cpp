@@ -143,9 +143,14 @@ void marqueeDraw(lgfx::LGFXBase& gfx) {
   const float r_in = r_out - static_cast<float>(s_band_h);
   const float r_mid = (r_out + r_in) * 0.5f;
   const float s_max = r_mid * kHalfSpanRad;
-  const float travel = 2.0f * s_max + static_cast<float>(s_text_w) + kGapPx;
+  const float travel = 2.0f * s_max + static_cast<float>(s_text_w);
   const float t = static_cast<float>(millis() - s_window_start_ms) * 0.001f;
-  const float s0 = s_max - fmodf(t * marquee::kSpeedPxPerSec, travel);
+  const float moved = t * marquee::kSpeedPxPerSec;
+  if (moved >= travel) {
+    stopWindow();  // one pass only: finished, so end the window early
+    return;
+  }
+  const float s0 = s_max - moved;
   if (s0 >= s_max || s0 + static_cast<float>(s_text_w) <= -s_max) {
     return;  // nothing in view right now: leave the radar untouched
   }
