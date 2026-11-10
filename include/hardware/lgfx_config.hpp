@@ -14,7 +14,11 @@ public:
   LGFX() {
     {
       auto cfg = _bus.config();
+      #ifdef BOARD_CLASSIC_ESP32
+      cfg.spi_host = SPI3_HOST;  // VSPI: fast native pins 18/23
+#else
       cfg.spi_host = SPI2_HOST;
+#endif
       cfg.freq_write = config::kDisplaySpiWriteHz;
       cfg.pin_sclk = static_cast<int>(config::kDisplayPinSclk);
       cfg.pin_mosi = static_cast<int>(config::kDisplayPinMosi);
